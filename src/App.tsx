@@ -2,7 +2,7 @@ import './App.css';
 import {TickerPriceSearch} from './components/TickerPriceSearch';
 import {useState} from 'react';
 // Import the new component placeholder (we'll create it next)
-// import { StockAnalysis } from './components/StockAnalysis';
+import {StockAnalysis} from './components/StockAnalysis';
 
 function App() {
 	// The currently selected/entered ticker symbol
@@ -37,16 +37,11 @@ function App() {
 							onTickerChange={setActiveTicker}
 						/>
 					</div>
-					<div className='md:w-2/3 w-full'>
-						<div className='p-6 bg-[#F3F4F6] rounded-lg shadow-md border border-gray-200 min-h-[28rem] md:min-h-full h-full flex items-center justify-center text-center text-gray-500'>
-							{activeTicker ? (
-								<div>
-									<h2 className='text-xl font-semibold mb-2'>
-										AI Analysis for {activeTicker}
-									</h2>
-									<p>This feature will be available soon</p>
-								</div>
-							) : (
+					<div className='md:w-2/3 w-full rounded-lg'>
+						{activeTicker ? (
+							<StockAnalysis tickerSymbol={activeTicker} />
+						) : (
+							<div className='p-6 bg-[#F3F4F6] rounded-lg shadow-md border border-gray-200 min-h-[28rem] md:min-h-full h-full flex items-center justify-center text-center text-gray-500'>
 								<div>
 									<h2 className='text-xl font-semibold mb-2'>
 										Enter a ticker to analyze
@@ -56,8 +51,8 @@ function App() {
 										AI-powered analysis
 									</p>
 								</div>
-							)}
-						</div>
+							</div>
+						)}
 					</div>
 				</div>
 			</main>

@@ -1,15 +1,45 @@
+// In TickerPriceSearch.tsx (updated with state management)
 import {useState, useEffect} from 'react';
-// Removed Alpha Vantage types, will define Marketstack types inline for now
-// import {GlobalQuote, GlobalQuoteResponse} from '../types/alpha-vantage';
+import {Button} from '@/components/ui/button';
+import {Loader2, Plus, X} from 'lucide-react';
+import {Tabs, TabsList, TabsTrigger, TabsContent} from '@/components/ui/tabs';
+import UploadStatusTracker from '@/components/UploadStatusTracker';
+import {PortfolioCSVParser} from '@/utils/portfolioParser';
+import {PortfolioParseResult} from '@/types/portfolio';
 
-// --- Define Props ---
+import {
+	UploadState,
+	AnalysisReadiness,
+	UploadedFile,
+	initialUploadState,
+	initialReadiness,
+	UploadCategory,
+} from '@/types/analysis';
+
+/* ---------- types ---------- */
+
+// ---------- days of history typically visible for each timeframe ----------
+const rangeDaysMap: Record<string, number> = {
+	'5-min': 1,
+	'15-min': 3,
+	'30-min': 5,
+	'1-hour': 10,
+	'4-hour': 30,
+	Daily: 180,
+	Weekly: 365 * 2,
+};
 interface TickerPriceSearchProps {
-	tickerSymbol: string; // The symbol passed down from App
-	onTickerChange: (newTicker: string) => void; // Function to call when input changes
+	tickerSymbol: string;
+	onTickerChange: (v: string) => void;
 }
-// --- ---
 
-// Define simple inline type for Marketstack EOD data
+interface UploadTabProps {
+	id: string;
+	accept: string;
+	multiple: boolean;
+	onFiles: (files: FileList) => void;
+}
+
 interface MarketstackEodData {
 	symbol: string;
 	open: number | null;
@@ -17,309 +47,1081 @@ interface MarketstackEodData {
 	low: number | null;
 	close: number | null;
 	volume: number | null;
-	date: string; // Date string e.g., "2023-10-27T00:00:00+0000"
-	// Add other fields if needed (e.g., exchange)
+	date: string;
 }
-
-// Define simple inline type for Marketstack API response
 interface MarketstackApiResponse {
 	data: MarketstackEodData[];
 	error?: {code: string; message: string};
-	// Include pagination if handling multiple results
 }
 
-// --- Update component signature to accept props ---
+interface PriceInfo {
+	price: number | null;
+	change: number | null;
+	percent: string | null;
+}
+
+interface KeyLevel {
+	price: number;
+	type: 'Support' | 'Resistance';
+	strength: string;
+}
+interface ChartMetric {
+	timeframe: string; // Added
+	keyLevels: KeyLevel[];
+	trend: string;
+	rsi: string;
+	macd: string;
+}
+
+interface ChartAnalysisResult {
+	fileName: string;
+	analysis: {
+		marketContext: string;
+		technical: {
+			trend: string;
+			rsi: string;
+			macd: string;
+			movingAverages: string;
+		};
+		recommendation: Array<{
+			name: 'Buy' | 'Hold' | 'Sell';
+			value: number;
+		}>;
+		risk: string;
+	} | null;
+	status: 'completed' | 'error';
+	error?: string;
+	analyzedAt: Date;
+}
+
+interface ProcessedChartData {
+	fileName: string;
+	fileType: string;
+	base64Data: string;
+	uploadedAt: Date;
+	processingStatus: 'pending' | 'processing' | 'completed' | 'error';
+}
+
+// Re‑usable drag‑and‑drop upload wrapper
+function UploadTab({id, accept, multiple, onFiles}: UploadTabProps) {
+	/* local preview list */
+	const [previews, setPreviews] = useState<{url: string; file: File}[]>([]);
+	const [isDragging, setIsDragging] = useState(false);
+
+	/* when the component unmounts, revoke blobs */
+	useEffect(
+		() => () => previews.forEach((p) => URL.revokeObjectURL(p.url)),
+		[previews]
+	);
+
+	const addFiles = (files: FileList) => {
+		if (!files.length) return;
+		/* show preview immediately */
+		const next = Array.from(files).map((file) => ({
+			file,
+			url: file.type.startsWith('image/')
+				? URL.createObjectURL(file)
+				: '', // empty url for non-images
+		}));
+		setPreviews((prev) => [...prev, ...next]);
+		onFiles(files); // delegate to parent upload logic
+	};
+
+	/* —— handlers —— */
+	const handleDrop = (e: React.DragEvent) => {
+		e.preventDefault();
+		setIsDragging(false);
+		addFiles(e.dataTransfer.files);
+	};
+
+	const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+		if (e.target.files) {
+			addFiles(e.target.files);
+			e.target.value = ''; // reset so same file can be chosen again
+		}
+	};
+
+	const remove = (url: string) =>
+		setPreviews((prev) => prev.filter((p) => p.url !== url));
+
+	/* —— UI —— */
+	return (
+		<div
+			onDragOver={(e) => {
+				e.preventDefault();
+				setIsDragging(true);
+			}}
+			onDragLeave={(e) => {
+				e.preventDefault();
+				setIsDragging(false);
+			}}
+			onDrop={handleDrop}
+			className={`relative rounded-lg min-h-[250px] bg-[#766DFB] border-2 border-dashed transition-all
+		  ${isDragging ? 'border-white/80 bg-white/10' : 'border-white/30'}`}>
+			{/* hidden file input */}
+			<input
+				id={id}
+				type='file'
+				accept={accept}
+				multiple={multiple}
+				className='hidden'
+				onChange={handleInput}
+			/>
+
+			{/* empty-state cover */}
+			{previews.length === 0 && (
+				<label
+					htmlFor={id}
+					className='absolute inset-0 flex flex-col items-center justify-center text-white cursor-pointer'>
+					<div className='bg-white/20 rounded-full p-4 mb-4'>
+						<Plus className='h-8 w-8' />
+					</div>
+					<span className='text-lg font-semibold'>Upload File</span>
+					<span className='text-sm text-white/70 mt-2'>
+						Drag &amp; drop or click
+					</span>
+				</label>
+			)}
+
+			{/* thumbnails grid */}
+			{previews.length > 0 && (
+				<div className='p-4 grid grid-cols-3 gap-2'>
+					{previews.map(({url, file}) => (
+						<div
+							key={url || file.name}
+							className='relative aspect-square rounded overflow-hidden bg-white/20'>
+							{/* image or generic icon */}
+							{url ? (
+								<img
+									src={url}
+									alt={file.name}
+									className='object-cover w-full h-full'
+								/>
+							) : (
+								<div className='flex items-center justify-center w-full h-full text-xs p-2 text-white/80'>
+									{file.name
+										.split('.')
+										.pop()
+										?.toUpperCase() || 'FILE'}
+								</div>
+							)}
+
+							{/* close button */}
+							<button
+								onClick={() => remove(url)}
+								className='absolute -top-2 -right-2 bg-black/70 rounded-full p-1 hover:bg-red-600 transition-colors'
+								aria-label='Remove'>
+								<X className='h-3 w-3 text-white' />
+							</button>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
 export function TickerPriceSearch({
 	tickerSymbol,
 	onTickerChange,
 }: TickerPriceSearchProps) {
-	// Update state to hold Marketstack data structure
 	const [eodData, setEodData] = useState<MarketstackEodData | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-	// Read the Marketstack API key
-	const apiKey = import.meta.env.VITE_MARKETSTACK_API_KEY;
+	// NEW: Upload state management
+	const [uploadState, setUploadState] =
+		useState<UploadState>(initialUploadState);
+	const [readiness, setReadiness] =
+		useState<AnalysisReadiness>(initialReadiness);
 
-	// --- Fetch quote when the tickerSymbol prop changes (debounced) ---
+	// Check if all requirements are met
+	const checkReadiness = () => {
+		const tickerValid = !!eodData && !!eodData.symbol;
+		const portfolioReady = uploadState.portfolio.status === 'ready';
+		const chartsReady = uploadState.charts.status === 'ready';
+		const researchReady = uploadState.research.status === 'ready';
+
+		const allRequirementsMet =
+			tickerValid && portfolioReady && chartsReady && researchReady;
+
+		setReadiness({
+			tickerValid,
+			portfolioReady,
+			chartsReady,
+			researchReady,
+			allRequirementsMet,
+		});
+	};
+
+	// Update readiness whenever upload state or ticker changes
 	useEffect(() => {
-		console.log(
-			'[TickerPriceSearch] useEffect triggered with tickerSymbol:',
-			tickerSymbol
-		); // Log prop change
-		// Debounce mechanism: Wait 500ms after user stops typing before fetching
-		const debounceTimer = setTimeout(() => {
-			if (tickerSymbol.trim()) {
-				const symbolToFetch = tickerSymbol.trim().toUpperCase();
-				console.log(
-					'[TickerPriceSearch] Debounce triggered, calling fetchQuote for:',
-					symbolToFetch
-				); // Log before fetch call
-				fetchQuote(symbolToFetch);
-			} else {
-				console.log(
-					'[TickerPriceSearch] Ticker symbol empty, clearing quote.'
-				); // Log clearing
-				setEodData(null);
-				setError(null);
-			}
-		}, 500); // Adjust debounce time as needed (e.g., 500ms)
+		checkReadiness();
+	}, [uploadState, eodData]);
 
-		// Cleanup function to clear timeout if component unmounts or ticker changes again quickly
-		return () => {
-			console.log('[TickerPriceSearch] Clearing debounce timer.'); // Log timer clear
-			clearTimeout(debounceTimer);
-		};
-	}, [tickerSymbol]); // Re-run effect when tickerSymbol prop changes
-	// --- ---
+	// Update upload state for a specific category
+	const updateUploadState = (category: UploadCategory, files: FileList) => {
+		const uploadedFiles: UploadedFile[] = Array.from(files).map((file) => ({
+			file,
+			uploadedAt: new Date(),
+			status: 'ready' as const, // For now, mark as ready immediately
+		}));
+		const newStatus =
+			category === 'charts'
+				? ('processing' as const)
+				: ('ready' as const);
+		setUploadState((prev) => ({
+			...prev,
+			[category]: {
+				...prev[category],
+				files: [...prev[category].files, ...uploadedFiles],
+				status: newStatus,
+			},
+		}));
+	};
 
-	// Encapsulate fetch logic into its own function
-	const fetchQuote = async (symbol: string) => {
-		console.log(
-			`[TickerPriceSearch] fetchQuote function started for: ${symbol}`
-		); // Log function start
-		if (!apiKey) {
-			console.error('[TickerPriceSearch] API key is missing!');
-			setError('Marketstack API key is missing. Check .env.local');
+	const [parsedPortfolio, setParsedPortfolio] =
+		useState<PortfolioParseResult | null>(null);
+	const [isParsingPortfolio, setIsParsingPortfolio] = useState(false);
+	// Existing API key
+	const apiKey = import.meta.env.VITE_MARKETSTACK_API_KEY;
+	const [processedChartData, setProcessedChartData] = useState<
+		ProcessedChartData[]
+	>([]);
+	// Modified handleAIAnalysis - now checks readiness
+	const handleAIAnalysis = async () => {
+		if (!readiness.allRequirementsMet) {
+			alert('All requirements must be met before running analysis.');
 			return;
 		}
 
-		setIsLoading(true);
-		setError(null);
-		setEodData(null); // Reset data before fetch
+		window.dispatchEvent(new Event('analysis-start'));
+		try {
+			// Prepare portfolio data
+			const portfolioData = parsedPortfolio
+				? {
+						positions: parsedPortfolio.positions,
+						totalValue: parsedPortfolio.totalValue,
+						parseErrors: parsedPortfolio.errors,
+						rawFiles: uploadState.portfolio.files.map(
+							(f) => f.file.name
+						),
+				  }
+				: {
+						positions: [],
+						rawFiles: uploadState.portfolio.files.map(
+							(f) => f.file.name
+						),
+				  };
 
-		// Construct Marketstack API URL (using /eod/latest endpoint)
-		const url = `http://api.marketstack.com/v1/eod/latest?access_key=${apiKey}&symbols=${symbol}`;
-		// Note: Free plan might be HTTP only. Use HTTPS if your plan supports it.
-		// const url = `https://api.marketstack.com/v1/eod/latest?access_key=${apiKey}&symbols=${symbol}`;
-		console.log(
-			`[TickerPriceSearch] Fetching quote from Marketstack URL: ${url}`
+			console.log('Portfolio data being sent:', portfolioData);
+			console.log('Parsed positions:', parsedPortfolio?.positions);
+
+			// ---------- build chart payloads ----------
+			const chartData = chartAnalysisResults.map((r) => ({
+				fileName: r.fileName,
+				analyzed: r.status === 'completed',
+				technicalAnalysis: r.analysis
+					? {
+							marketContext: r.analysis!.marketContext,
+							trend: r.analysis!.technical.trend,
+							rsi: r.analysis!.technical.rsi,
+							macd: r.analysis!.technical.macd,
+							movingAverages:
+								r.analysis!.technical.movingAverages,
+							recommendation: r.analysis!.recommendation,
+							risk: r.analysis!.risk,
+					  }
+					: null,
+				error: r.error,
+			}));
+
+			const failedCharts = chartAnalysisResults
+				.filter((r) => r.status === 'error')
+				.map((r) => ({
+					fileName: r.fileName,
+					error: r.error ?? 'Analysis failed',
+				}));
+
+			// ---------- build concise numeric metrics ----------
+			const chartMetrics: ChartMetric[] = chartAnalysisResults
+				.filter((r) => r.status === 'completed' && r.analysis)
+				.map((r) => ({
+					timeframe: inferTimeframe(r.fileName), // Added
+					keyLevels: r.analysis!.keyLevels ?? [],
+					trend: r.analysis!.technical.trend,
+					rsi: r.analysis!.technical.rsi,
+					macd: r.analysis!.technical.macd,
+				}));
+			console.log('chartMetrics sent:', chartMetrics);
+
+			console.log('Chart analysis data being sent:', {
+				analyzed: chartData.length,
+				failed: failedCharts.length,
+				total: uploadState.charts.files.length,
+			});
+
+			// Added: real‑time price + timeframe context
+			const detectedTimeframe =
+				chartMetrics[0]?.timeframe !== 'Unknown'
+					? chartMetrics[0].timeframe
+					: '4-hour'; // Default to 4-hour if not detected
+
+			const priceContext = {
+				current: eodData?.close ?? null,
+				timeframe: detectedTimeframe,
+				rangeDays: rangeDaysMap[detectedTimeframe] || 180,
+			};
+			const res = await fetch(
+				`${import.meta.env.VITE_SUPABASE_FN_URL}/integrated-analysis`,
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+						Authorization: `Bearer ${
+							import.meta.env.VITE_SUPABASE_ANON_KEY
+						}`,
+					},
+					body: JSON.stringify({
+						ticker: eodData?.symbol,
+						portfolio: portfolioData,
+						charts:
+							chartData.length > 0
+								? chartData
+								: uploadState.charts.files.map((f) => ({
+										name: f.file.name,
+										analyzed: false,
+								  })),
+						chartsAnalyzed: chartData.length,
+						chartsFailed: failedCharts,
+						chartMetrics,
+						research: uploadState.research.files.map((f) => ({
+							name: f.file.name,
+						})),
+						priceContext, // Added
+					}),
+				}
+			);
+			console.log('priceContext sent:', priceContext);
+
+			const j = await res.json();
+			if (j.success) {
+				window.dispatchEvent(
+					new CustomEvent('analysis-ready', {detail: j.analysis})
+				);
+			} else {
+				alert(j.error || 'Integrated analysis error');
+			}
+		} catch (err) {
+			console.error(err);
+			alert('Analysis call failed');
+		} finally {
+			window.dispatchEvent(new Event('analysis-done'));
+		}
+	};
+
+	// Modified upload handlers - now store files instead of processing immediately
+	const handlePortfolioUpload = async (files: FileList) => {
+		updateUploadState('portfolio', files);
+
+		// Parse CSV files immediately
+		setIsParsingPortfolio(true);
+		try {
+			const csvFiles = Array.from(files).filter(
+				(f) =>
+					f.name.toLowerCase().endsWith('.csv') ||
+					f.type === 'text/csv'
+			);
+
+			if (csvFiles.length > 0) {
+				const parser = new PortfolioCSVParser();
+				const result = await parser.parseMultipleCSVs(csvFiles);
+
+				setParsedPortfolio(result);
+
+				// Show user feedback
+				if (result.errors.length > 0) {
+					console.error('Portfolio parsing errors:', result.errors);
+					// TODO: Show errors in UI
+				}
+				if (result.warnings.length > 0) {
+					console.warn(
+						'Portfolio parsing warnings:',
+						result.warnings
+					);
+				}
+
+				console.log(
+					`Parsed ${result.positions.length} positions from ${csvFiles.length} file(s)`
+				);
+			}
+		} catch (error) {
+			console.error('Failed to parse portfolio files:', error);
+		} finally {
+			setIsParsingPortfolio(false);
+		}
+	};
+
+	// Added: infer timeframe from file‑name keywords
+	const inferTimeframe = (fileName: string): string => {
+		const n = fileName.toLowerCase();
+		// More patterns to catch timeframe
+		if (
+			n.includes('4h') ||
+			n.includes('4-h') ||
+			n.includes('4hr') ||
+			n.includes('4 hour')
+		)
+			return '4-hour';
+		if (
+			n.includes('1h') ||
+			n.includes('1-h') ||
+			n.includes('1hr') ||
+			n.includes('1 hour')
+		)
+			return '1-hour';
+		if (n.includes('30m') || n.includes('30min') || n.includes('30 min'))
+			return '30-min';
+		if (n.includes('15m') || n.includes('15min') || n.includes('15 min'))
+			return '15-min';
+		if (n.includes('5m') || n.includes('5min') || n.includes('5 min'))
+			return '5-min';
+		if (n.includes('weekly') || n.includes('1w') || n.includes('week'))
+			return 'Weekly';
+		if (n.includes('daily') || n.includes('1d') || n.includes('day'))
+			return 'Daily';
+		// Default to 4-hour for unknown
+		return '4-hour';
+	};
+
+	const convertFileToBase64 = (file: File): Promise<string> => {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.readAsDataURL(file);
+			reader.onload = () => {
+				if (typeof reader.result === 'string') {
+					resolve(reader.result);
+				} else {
+					reject(new Error('Failed to convert file to base64'));
+				}
+			};
+			reader.onerror = (error) => reject(error);
+		});
+	};
+
+	const handleChartsUpload = async (files: FileList) => {
+		updateUploadState('charts', files);
+
+		// Process each image file to extract base64 data
+		const processedCharts: ProcessedChartData[] = [];
+
+		for (const file of Array.from(files)) {
+			if (file.type.startsWith('image/')) {
+				try {
+					const base64 = await convertFileToBase64(file);
+
+					processedCharts.push({
+						fileName: file.name,
+						fileType: file.type,
+						base64Data: base64,
+						uploadedAt: new Date(),
+						processingStatus: 'pending',
+					});
+				} catch (error) {
+					console.error(
+						`Failed to process chart ${file.name}:`,
+						error
+					);
+				}
+			}
+		}
+
+		setProcessedChartData((prev) => {
+			const next = [...prev, ...processedCharts];
+			console.log('processedChartData', next);
+			return next;
+		});
+	};
+
+	// const analyzeChartImage = async (
+	// 	chartData: ProcessedChartData
+	// ): Promise<ChartAnalysisResult> => {
+	// 	try {
+	// 		// ---- dev log: show exactly what goes to chart‑vision (ticker + first 80 chars) ----
+	// 		const payloadPreview = {
+	// 			imageHead: chartData.base64Data.slice(0, 80) + '…',
+	// 			ticker: eodData?.symbol || 'UNKNOWN',
+	// 			context: 'chart',
+	// 		};
+	// 		console.log('[chart‑vision] Request payload:', payloadPreview);
+	// 		const response = await fetch(
+	// 			`${import.meta.env.VITE_SUPABASE_FN_URL}/chart-vision`,
+	// 			{
+	// 				method: 'POST',
+	// 				headers: {
+	// 					'Content-Type': 'application/json',
+	// 					apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+	// 					Authorization: `Bearer ${
+	// 						import.meta.env.VITE_SUPABASE_ANON_KEY
+	// 					}`,
+	// 				},
+	// 				body: JSON.stringify({
+	// 					image: chartData.base64Data,
+	// 					ticker: eodData?.symbol || 'UNKNOWN',
+	// 					context: 'chart',
+	// 					priceContext: {
+	// 						currentPrice: eodData?.close ?? null,
+	// 						timeframe: inferTimeframe(chartData.fileName),
+	// 						rangeDays:
+	// 							rangeDaysMap[
+	// 								inferTimeframe(chartData.fileName)
+	// 							] || 180,
+	// 					},
+	// 				}),
+	// 			}
+	// 		);
+
+	// 		const result = await response.json();
+	// 		console.log(
+	// 			'[chart‑vision] Response for',
+	// 			chartData.fileName,
+	// 			result
+	// 		);
+
+	// 		if (result.success && result.analysis) {
+	// 			return {
+	// 				fileName: chartData.fileName,
+	// 				analysis: result.analysis,
+	// 				status: 'completed' as const,
+	// 				analyzedAt: new Date(),
+	// 			};
+	// 		} else {
+	// 			throw new Error(result.error || 'Chart analysis failed');
+	// 		}
+	// 	} catch (error) {
+	// 		console.error(
+	// 			`Failed to analyze chart ${chartData.fileName}:`,
+	// 			error
+	// 		);
+	// 		return {
+	// 			fileName: chartData.fileName,
+	// 			analysis: null,
+	// 			status: 'error' as const,
+	// 			error: error instanceof Error ? error.message : 'Unknown error',
+	// 			analyzedAt: new Date(),
+	// 		};
+	// 	}
+	// };
+
+	const analyzeChartImage = async (
+		chartData: ProcessedChartData
+	): Promise<ChartAnalysisResult> => {
+		try {
+			// Added: Validate environment variables before making the fetch call.
+			// This provides a clearer error if the .env.local file is not configured correctly.
+			const fnUrl = import.meta.env.VITE_SUPABASE_FN_URL;
+			const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+			if (!fnUrl || !anonKey) {
+				throw new Error(
+					'Supabase Function URL or Anon Key is not configured. Please check your .env.local file.'
+				);
+			}
+
+			// ---- dev log: show exactly what goes to chart‑vision (ticker + first 80 chars) ----
+			const payloadPreview = {
+				imageHead: chartData.base64Data.slice(0, 80) + '…',
+				ticker: eodData?.symbol || 'UNKNOWN',
+				context: 'chart',
+			};
+			console.log('[chart‑vision] Request payload:', payloadPreview);
+			const response = await fetch(`${fnUrl}/chart-vision`, {
+				// Changed: Use validated variable
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					apikey: anonKey, // Changed: Use validated variable
+					Authorization: `Bearer ${anonKey}`, // Changed: Use validated variable
+				},
+				body: JSON.stringify({
+					image: chartData.base64Data,
+					ticker: eodData?.symbol || 'UNKNOWN',
+					context: 'chart',
+					priceContext: {
+						currentPrice: eodData?.close ?? null,
+						timeframe: inferTimeframe(chartData.fileName),
+						rangeDays:
+							rangeDaysMap[inferTimeframe(chartData.fileName)] ||
+							180,
+					},
+				}),
+			});
+
+			const result = await response.json();
+			console.log(
+				'[chart‑vision] Response for',
+				chartData.fileName,
+				result
+			);
+
+			if (result.success && result.analysis) {
+				return {
+					fileName: chartData.fileName,
+					analysis: result.analysis,
+					status: 'completed' as const,
+					analyzedAt: new Date(),
+				};
+			} else {
+				throw new Error(result.error || 'Chart analysis failed');
+			}
+		} catch (error) {
+			console.error(
+				`Failed to analyze chart ${chartData.fileName}:`,
+				error
+			);
+			// Changed: Make the returned error message more specific to guide debugging.
+			const errorMessage =
+				error instanceof Error ? error.message : 'Unknown error';
+			return {
+				fileName: chartData.fileName,
+				analysis: null,
+				status: 'error' as const,
+				error: `Analysis failed: ${errorMessage}`,
+				analyzedAt: new Date(),
+			};
+		}
+	};
+	// Helper to mark charts as ready after analysis
+	const markChartsReady = (results?: ChartAnalysisResult[]) => {
+		// Use passed results or fall back to state
+		const resultsToCheck = results || chartAnalysisResults;
+
+		// Check if we have ANY results at all
+		if (resultsToCheck.length === 0) {
+			console.log('[markChartsReady] No results to check yet');
+			return;
+		}
+
+		const hasAnySuccess = resultsToCheck.some(
+			(r) => r.status === 'completed'
+		);
+		const allProcessed = processedChartData.every(
+			(chart) =>
+				chart.processingStatus === 'completed' ||
+				chart.processingStatus === 'error'
 		);
 
+		console.log('[markChartsReady] Status check:', {
+			hasAnySuccess,
+			allProcessed,
+			resultsCount: resultsToCheck.length,
+		});
+
+		if (allProcessed && hasAnySuccess) {
+			setUploadState((prev) => ({
+				...prev,
+				charts: {...prev.charts, status: 'ready' as const},
+			}));
+		}
+	};
+
+	const processChartAnalysis = async () => {
+		const pendingCharts = processedChartData.filter(
+			(chart) => chart.processingStatus === 'pending'
+		);
+
+		if (pendingCharts.length === 0) return;
+
+		console.log(`Starting analysis of ${pendingCharts.length} charts...`);
+
+		// Update status to processing
+		setProcessedChartData((prev) =>
+			prev.map((chart) =>
+				pendingCharts.find((p) => p.fileName === chart.fileName)
+					? {...chart, processingStatus: 'processing' as const}
+					: chart
+			)
+		);
+
+		// Analyze charts in parallel (max 3 at a time to avoid rate limits)
+		const batchSize = 3;
+		const results: ChartAnalysisResult[] = [];
+
+		for (let i = 0; i < pendingCharts.length; i += batchSize) {
+			const batch = pendingCharts.slice(i, i + batchSize);
+			const batchResults = await Promise.all(
+				batch.map((chart) => analyzeChartImage(chart))
+			);
+			results.push(...batchResults);
+		}
+
+		// Store analysis results
+		setChartAnalysisResults((prev) => [...prev, ...results]);
+
+		// Update processing status
+		setProcessedChartData((prev) =>
+			prev.map((chart) => {
+				const result = results.find(
+					(r) => r.fileName === chart.fileName
+				);
+				if (result) {
+					return {
+						...chart,
+						processingStatus:
+							result.status === 'completed'
+								? 'completed'
+								: 'error',
+					};
+				}
+				return chart;
+			})
+		);
+
+		/* ---- determine if all charts are now finished ---- */
+		const allFinished = results.every(
+			(r) => r.status === 'completed' || r.status === 'error'
+		);
+		if (allFinished) {
+			markChartsReady(results);
+		}
+
+		console.log(
+			`Chart analysis complete. Success: ${
+				results.filter((r) => r.status === 'completed').length
+			}/${results.length}`
+		);
+		// All charts now processed → mark category ready
+		// markChartsReady();  // (removed: now handled above only if all finished)
+	};
+
+	const [chartAnalysisResults, setChartAnalysisResults] = useState<
+		ChartAnalysisResult[]
+	>([]);
+
+	useEffect(() => {
+		if (chartAnalysisResults.length > 0 && processedChartData.length > 0) {
+			// Check if all charts are processed
+			const allProcessed = processedChartData.every(
+				(chart) =>
+					chart.processingStatus === 'completed' ||
+					chart.processingStatus === 'error'
+			);
+
+			if (allProcessed) {
+				markChartsReady();
+			}
+		}
+	}, [chartAnalysisResults, processedChartData]);
+
+	const handleResearchUpload = (files: FileList) => {
+		updateUploadState('research', files);
+		// TODO: In Phase 3, process research documents
+		console.log('Research files stored:', files.length);
+	};
+
+	// Existing useEffect hooks
+	useEffect(() => {
+		const s = () => setIsAnalyzing(true);
+		const d = () => setIsAnalyzing(false);
+		window.addEventListener('analysis-start', s);
+		window.addEventListener('analysis-done', d);
+		return () => {
+			window.removeEventListener('analysis-start', s);
+			window.removeEventListener('analysis-done', d);
+		};
+	}, []);
+
+	// Kick off chart analysis as soon as any new pending charts appear
+	useEffect(() => {
+		const hasPending = processedChartData.some(
+			(c) => c.processingStatus === 'pending'
+		);
+		if (hasPending) {
+			processChartAnalysis();
+		}
+	}, [processedChartData]);
+
+	// Existing quote fetch logic
+	useEffect(() => {
+		const t = setTimeout(() => {
+			const sym = tickerSymbol.trim().toUpperCase();
+			if (sym) {
+				fetchQuote(sym);
+			} else {
+				setEodData(null);
+				setError(null);
+			}
+		}, 500);
+		return () => clearTimeout(t);
+	}, [tickerSymbol]);
+
+	async function fetchQuote(symbol: string) {
+		if (!apiKey) return setError('Marketstack key missing.');
+		setIsLoading(true);
+		setError(null);
+		setEodData(null);
+
 		try {
-			const response = await fetch(url);
-			console.log(
-				'[TickerPriceSearch] API Raw Response Status:',
-				response.status
+			const url = `https://api.marketstack.com/v1/eod/latest?access_key=${apiKey}&symbols=${symbol}`;
+			const r = await fetch(url);
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			const j: MarketstackApiResponse = await r.json();
+			if (j.error) throw new Error(j.error.message);
+			if (!j.data?.length) throw new Error('No data');
+			const latest = j.data[0];
+			setEodData(latest);
+
+			/* broadcast to StockAnalysis */
+			window.dispatchEvent(
+				new CustomEvent<PriceInfo>('price-update', {
+					detail: {
+						price: latest.close,
+						change:
+							latest.open != null && latest.close != null
+								? +(latest.close - latest.open).toFixed(2)
+								: null,
+						percent:
+							latest.open != null
+								? (
+										((latest.close! - latest.open) /
+											latest.open) *
+										100
+								  ).toFixed(2) + '%'
+								: null,
+					},
+				})
 			);
-			if (!response.ok)
-				throw new Error(
-					`API request failed with status ${response.status}`
-				);
-
-			const data: MarketstackApiResponse = await response.json();
-			console.log('[TickerPriceSearch] Parsed API Response Data:', data);
-
-			// Handle Marketstack specific errors
-			if (data.error) {
-				throw new Error(
-					`Marketstack API Error: ${data.error.message} (Code: ${data.error.code})`
-				);
-			}
-
-			// Check if data array exists and has at least one entry
-			if (!data.data || data.data.length === 0) {
-				throw new Error(
-					`No data found for symbol: ${symbol} from Marketstack`
-				);
-			}
-
-			// Get the latest (usually only) entry from the data array
-			const latestData = data.data[0];
-			console.log(
-				'[TickerPriceSearch] Setting EOD data state with:',
-				latestData
-			);
-			setEodData(latestData);
-			setError(null);
 		} catch (err) {
-			console.error('[TickerPriceSearch] Fetch error caught:', err); // Log caught error
-			if (err instanceof Error) setError(err.message);
-			else
-				setError('An unknown error occurred while fetching the quote.');
-			setEodData(null); // Clear quote on error
+			setError(err instanceof Error ? err.message : 'Fetch failed');
 		} finally {
-			console.log(
-				'[TickerPriceSearch] Fetch sequence finished, setting isLoading to false.'
-			);
 			setIsLoading(false);
 		}
-	};
+	}
 
-	// Helper function to format numbers and handle potential NaN
-	const formatNumber = (
-		value: string | number | undefined | null
-	): string => {
-		if (value === undefined || value === null) return 'N/A';
-		const num = Number(value);
-		return isNaN(num) ? 'N/A' : num.toFixed(2);
-	};
-
-	const formatDate = (dateString: string | undefined | null): string => {
-		if (!dateString) return 'N/A';
-		try {
-			return new Date(dateString).toLocaleDateString();
-		} catch {
-			return 'Invalid Date';
-		}
-	};
+	const nf = (v: number | null) => (v == null ? 'N/A' : v.toFixed(2));
+	const df = (d?: string | null) =>
+		d ? new Date(d).toLocaleDateString() : 'N/A';
 
 	return (
 		<div className='h-full w-full'>
 			<div className='rounded-lg overflow-hidden shadow-md bg-[#9089FC] border border-[#7c77d1] h-full flex flex-col'>
-				{/* Search Header */}
+				{/* header */}
 				<div className='bg-[#7c77d1] px-4 py-4 border-b border-[#6c68b8]'>
 					<h2 className='text-lg font-semibold mb-2 text-white'>
 						Stock Lookup
 					</h2>
-					<div className='relative'>
-						<input
-							type='text'
-							value={tickerSymbol}
-							onChange={(e) =>
-								onTickerChange(e.target.value.toUpperCase())
-							}
-							placeholder='Enter ticker symbol (e.g., AAPL)'
-							className='w-full pl-10 pr-4 py-2 rounded-md bg-white border border-[#6c68b8] text-gray-800 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-						/>
-						<div className='absolute left-3 top-2.5 text-gray-500'>
-							<svg
-								xmlns='http://www.w3.org/2000/svg'
-								className='h-5 w-5'
-								viewBox='0 0 20 20'
-								fill='currentColor'>
-								<path
-									fillRule='evenodd'
-									d='M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z'
-									clipRule='evenodd'
-								/>
-							</svg>
-						</div>
-					</div>
+					<input
+						value={tickerSymbol}
+						onChange={(e) =>
+							onTickerChange(e.target.value.toUpperCase())
+						}
+						placeholder='Enter ticker (e.g., NVDA)'
+						className='w-full px-3 py-2 rounded bg-white text-gray-800'
+					/>
 					{!apiKey && (
-						<p className='text-yellow-100 text-xs mt-2 font-medium'>
-							⚠️ API Key missing. Please configure .env.local
+						<p className='text-xs text-yellow-200 mt-2'>
+							⚠️ Configure VITE_MARKETSTACK_API_KEY
 						</p>
 					)}
 				</div>
 
-				{/* Quote Card */}
-				<div className='p-0 text-white flex-grow'>
+				{/* body */}
+				<div className='p-0 flex-grow text-white'>
 					{isLoading && (
-						<div className='flex items-center justify-center p-8 h-64'>
-							<div className='animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white'></div>
+						<div className='flex items-center justify-center h-64'>
+							<div className='h-10 w-10 animate-spin border-t-2 border-b-2 border-white rounded-full' />
 						</div>
 					)}
 
 					{error && (
-						<div className='p-6 text-center'>
-							<div className='inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mb-4'>
-								<svg
-									xmlns='http://www.w3.org/2000/svg'
-									className='h-6 w-6 text-red-600'
-									fill='none'
-									viewBox='0 0 24 24'
-									stroke='currentColor'>
-									<path
-										strokeLinecap='round'
-										strokeLinejoin='round'
-										strokeWidth={2}
-										d='M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-									/>
-								</svg>
-							</div>
-							<p className='text-white font-medium'>{error}</p>
-							<p className='text-white/80 text-sm mt-2'>
-								Please try again with a different symbol
-							</p>
+						<div className='flex items-center justify-center h-64 text-center'>
+							<p className='font-medium text-red-200'>{error}</p>
 						</div>
 					)}
 
 					{!isLoading && !error && eodData && (
 						<div>
-							{/* Quote Header */}
-							<div className='bg-[#8079e3] p-4 border-b border-[#6c68b8]'>
-								<div className='flex justify-between items-center'>
-									<h2 className='text-2xl font-bold'>
-										{eodData.symbol}
-									</h2>
-									<div className='flex flex-col items-end'>
-										<div className='text-2xl font-bold'>
-											${formatNumber(eodData.close)}
-										</div>
-									</div>
-								</div>
+							{/* quote header */}
+							<div className='bg-[#8079e3] p-4 border-b border-[#6c68b8] flex justify-between'>
+								<h2 className='text-2xl font-bold'>
+									{eodData.symbol}
+								</h2>
+								<span className='text-2xl font-bold'>
+									${nf(eodData.close)}
+								</span>
 							</div>
 
-							{/* Quote Details */}
+							{/* grid */}
 							<div className='p-4'>
 								<div className='grid grid-cols-2 gap-3'>
-									<div className='bg-[#8079e3] p-3 rounded-md'>
-										<div className='text-white/70 text-xs'>
-											Open
+									{[
+										['Open', eodData.open],
+										['High', eodData.high],
+										['Low', eodData.low],
+									].map(([lbl, val]) => (
+										<div
+											key={lbl}
+											className='bg-[#8079e3] p-3 rounded flex flex-col'>
+											<span className='text-xs text-white/70'>
+												{lbl}
+											</span>
+											<span className='font-medium'>
+												${nf(val as number)}
+											</span>
 										</div>
-										<div className='font-medium'>
-											${formatNumber(eodData.open)}
-										</div>
-									</div>
-									<div className='bg-[#8079e3] p-3 rounded-md'>
-										<div className='text-white/70 text-xs'>
-											Day High
-										</div>
-										<div className='font-medium'>
-											${formatNumber(eodData.high)}
-										</div>
-									</div>
-									<div className='bg-[#8079e3] p-3 rounded-md'>
-										<div className='text-white/70 text-xs'>
-											Day Low
-										</div>
-										<div className='font-medium'>
-											${formatNumber(eodData.low)}
-										</div>
-									</div>
-									<div className='bg-[#8079e3] p-3 rounded-md col-span-2'>
-										<div className='text-white/70 text-xs'>
+									))}
+									<div className='bg-[#8079e3] p-3 rounded col-span-2'>
+										<span className='text-xs text-white/70'>
 											Volume
-										</div>
-										<div className='font-medium'>
-											{eodData.volume
-												? Number(
-														eodData.volume
-												  ).toLocaleString()
-												: 'N/A'}
-										</div>
+										</span>
+										<span className='font-medium'>
+											{eodData.volume?.toLocaleString() ??
+												'N/A'}
+										</span>
 									</div>
 								</div>
 
-								<div className='mt-4 text-right text-xs text-white/70'>
-									Last updated: {formatDate(eodData.date)}
+								{/* Tabbed Upload Interface */}
+								<div className='mt-4 space-y-4'>
+									<UploadStatusTracker
+										readiness={readiness}
+										uploadState={uploadState}
+									/>
+
+									<Button
+										disabled={
+											!readiness.allRequirementsMet ||
+											isAnalyzing
+										}
+										onClick={handleAIAnalysis}
+										className={`w-full font-semibold py-3 px-4 rounded-lg shadow-md inline-flex items-center gap-2 transition-all ${
+											readiness.allRequirementsMet
+												? 'bg-[#88FC8F] hover:bg-[#7AE881] text-gray-800'
+												: 'bg-gray-500 text-gray-300 cursor-not-allowed'
+										}`}>
+										{isAnalyzing ? (
+											<>
+												<Loader2 className='h-4 w-4 animate-spin' />
+												Building…
+											</>
+										) : (
+											<>
+												🤖 Generate AI Analysis
+												{!readiness.allRequirementsMet && (
+													<span className='text-xs ml-2'>
+														(
+														{
+															Object.entries(
+																readiness
+															).filter(
+																([k, v]) =>
+																	k !==
+																		'allRequirementsMet' &&
+																	!v
+															).length
+														}{' '}
+														requirements missing)
+													</span>
+												)}
+											</>
+										)}
+									</Button>
+
+									<Tabs
+										defaultValue='portfolio'
+										className='w-full'>
+										<TabsList className='grid w-full grid-cols-3 bg-[#766DFB] rounded-2xl p-1'>
+											<TabsTrigger
+												value='portfolio'
+												className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
+												Portfolio{' '}
+												{uploadState.portfolio.files
+													.length > 0 &&
+													`(${uploadState.portfolio.files.length})`}
+											</TabsTrigger>
+											<TabsTrigger
+												value='charts'
+												className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
+												Charts{' '}
+												{uploadState.charts.files
+													.length > 0 &&
+													`(${uploadState.charts.files.length})`}
+											</TabsTrigger>
+											<TabsTrigger
+												value='research'
+												className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
+												Deep research{' '}
+												{uploadState.research.files
+													.length > 0 &&
+													`(${uploadState.research.files.length})`}
+											</TabsTrigger>
+										</TabsList>
+
+										<TabsContent
+											value='portfolio'
+											className='mt-4'>
+											<UploadTab
+												id='portfolio-files'
+												accept='image/*,.csv,.xlsx'
+												multiple
+												onFiles={handlePortfolioUpload}
+											/>
+
+											{isParsingPortfolio && (
+												<div className='mt-2 text-sm text-white/70 flex items-center gap-2'>
+													<Loader2 className='h-3 w-3 animate-spin' />
+													Parsing CSV files…
+												</div>
+											)}
+
+											{parsedPortfolio && (
+												<div className='mt-2 text-sm text-white/90'>
+													✓ Parsed{' '}
+													{
+														parsedPortfolio
+															.positions.length
+													}{' '}
+													positions
+												</div>
+											)}
+										</TabsContent>
+
+										<TabsContent
+											value='charts'
+											className='mt-4'>
+											<UploadTab
+												id='chart-images'
+												accept='image/*'
+												multiple
+												onFiles={handleChartsUpload}
+											/>
+										</TabsContent>
+
+										<TabsContent
+											value='research'
+											className='mt-4'>
+											<UploadTab
+												id='research-files'
+												accept='.pdf,.doc,.docx,.txt,.rtf,.md,.csv,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword'
+												multiple
+												onFiles={handleResearchUpload}
+											/>
+										</TabsContent>
+									</Tabs>
+
+									<span className='text-xs text-white/70'>
+										Last updated: {df(eodData.date)}
+									</span>
 								</div>
 							</div>
 						</div>
 					)}
 
 					{!isLoading && !error && !eodData && (
-						<div className='flex flex-col items-center justify-center p-8 flex-grow text-center'>
-							<svg
-								xmlns='http://www.w3.org/2000/svg'
-								className='h-12 w-12 text-white/70 mb-4'
-								fill='none'
-								viewBox='0 0 24 24'
-								stroke='currentColor'>
-								<path
-									strokeLinecap='round'
-									strokeLinejoin='round'
-									strokeWidth={1.5}
-									d='M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z'
-								/>
-							</svg>
-							<h3 className='text-lg font-medium text-white'>
-								No Stock Data
-							</h3>
-							<p className='text-white/80 mt-1'>
-								Enter a ticker symbol to view market data
-							</p>
+						<div className='flex items-center justify-center h-64'>
+							<p>Enter a ticker to view data.</p>
 						</div>
 					)}
 				</div>

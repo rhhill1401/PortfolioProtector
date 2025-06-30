@@ -268,9 +268,11 @@ export function TickerPriceSearch({
 			status: 'ready' as const, // For now, mark as ready immediately
 		}));
 		const newStatus =
-			category === 'charts'
-				? ('processing' as const)
-				: ('ready' as const);
+			category === 'portfolio'
+				? ('processing' as const)      // keep portfolio tab locked
+				: category === 'charts'
+					? ('processing' as const)    // charts already handled
+					: ('ready' as const);        // research files
 		setUploadState((prev) => ({
 			...prev,
 			[category]: {
@@ -304,6 +306,7 @@ export function TickerPriceSearch({
 						positions: parsedPortfolio.positions,
 						totalValue: parsedPortfolio.totalValue,
 						parseErrors: parsedPortfolio.errors,
+						metadata: parsedPortfolio.metadata, // 🎯 CRITICAL FIX: Include option positions metadata
 						rawFiles: uploadState.portfolio.files.map(
 							(f) => f.file.name
 						),
@@ -370,9 +373,98 @@ export function TickerPriceSearch({
 
 			const priceContext = {
 				current: eodData?.close ?? null,
+				open: eodData?.open ?? null,
+				high: eodData?.high ?? null,
+				low: eodData?.low ?? null,
+				close: eodData?.close ?? null,
+				volume: eodData?.volume ?? null,
+				date: eodData?.date ?? null,
 				timeframe: detectedTimeframe,
 				rangeDays: rangeDaysMap[detectedTimeframe] || 180,
 			};
+			// 🚀 Log the complete payload being sent to AI
+			const analysisPayload = {
+				ticker: eodData?.symbol,
+				portfolio: portfolioData,
+				charts:
+					chartData.length > 0
+						? chartData
+						: uploadState.charts.files.map((f) => ({
+								name: f.file.name,
+								analyzed: false,
+						  })),
+				chartsAnalyzed: chartData.length,
+				chartsFailed: failedCharts,
+				chartMetrics,
+				research: uploadState.research.files.map((f) => ({
+					name: f.file.name,
+				})),
+				priceContext, // Added
+			};
+			
+			console.log('🚀 [AI REQUEST DEBUG] Complete Payload Sent to /integrated-analysis:', {
+				timestamp: new Date().toISOString(),
+				endpoint: `${import.meta.env.VITE_SUPABASE_FN_URL}/integrated-analysis`,
+				payload: analysisPayload,
+				payloadSize: JSON.stringify(analysisPayload).length + ' characters'
+			});
+			
+			console.log('📊 [PAYLOAD BREAKDOWN]', {
+				ticker: analysisPayload.ticker,
+				hasPortfolio: !!analysisPayload.portfolio,
+				portfolioPositions: analysisPayload.portfolio?.positions?.length || 0,
+				portfolioTotalValue: analysisPayload.portfolio?.totalValue,
+				chartMetricsCount: analysisPayload.chartMetrics?.length || 0,
+				researchDocsCount: analysisPayload.research?.length || 0,
+				priceContext: analysisPayload.priceContext,
+				chartMetricsDetails: analysisPayload.chartMetrics,
+				chartsAnalyzed: analysisPayload.chartsAnalyzed,
+				chartsFailed: analysisPayload.chartsFailed
+			});
+
+			// 🎯 CRITICAL: Log the actual portfolio data being sent
+			if (analysisPayload.portfolio && analysisPayload.portfolio.positions) {
+				console.log('💼 [PORTFOLIO POSITIONS DETECTED]', {
+					positionCount: analysisPayload.portfolio.positions.length,
+					positions: analysisPayload.portfolio.positions,
+					totalValue: analysisPayload.portfolio.totalValue,
+					hasCurrentPositions: analysisPayload.portfolio.positions.length > 0,
+					hasMetadata: !!analysisPayload.portfolio.metadata,
+					metadataKeys: analysisPayload.portfolio.metadata ? Object.keys(analysisPayload.portfolio.metadata) : 'no metadata',
+					optionPositionsCount: analysisPayload.portfolio.metadata?.optionPositions?.length || 0,
+					firstOptionPosition: analysisPayload.portfolio.metadata?.optionPositions?.[0] || 'none'
+				});
+				
+				// 🚨 ULTRA CRITICAL: Log the EXACT payload structure being sent to integrated-analysis
+				console.log('🚨 [ULTRA CRITICAL] EXACT PAYLOAD TO INTEGRATED-ANALYSIS:', JSON.stringify({
+					ticker: analysisPayload.ticker,
+					portfolio: analysisPayload.portfolio,
+					portfolioStructure: {
+						hasPositions: !!analysisPayload.portfolio.positions,
+						positionsLength: analysisPayload.portfolio.positions?.length || 0,
+						positions: analysisPayload.portfolio.positions,
+						hasMetadata: !!analysisPayload.portfolio.metadata,
+						metadata: analysisPayload.portfolio.metadata,
+						optionPositions: analysisPayload.portfolio.metadata?.optionPositions || []
+					}
+				}, null, 2));
+			} else {
+				console.log('❌ [NO PORTFOLIO DATA] Portfolio is missing or empty:', {
+					portfolio: analysisPayload.portfolio,
+					hasPortfolioKey: 'portfolio' in analysisPayload,
+					portfolioType: typeof analysisPayload.portfolio
+				});
+			}
+
+			// 🔍 VALIDATION: Check if we expect COVERED_CALL or CASH_SECURED_PUT
+			const expectedPhase = analysisPayload.portfolio?.positions?.some((p: any) => p.symbol === tickerSymbol) ? 'COVERED_CALL' : 'CASH_SECURED_PUT';
+			console.log('🔍 [VALIDATION] Expected wheel phase based on positions:', {
+				ticker: tickerSymbol,
+				hasIBITPosition: analysisPayload.portfolio?.positions?.some((p: any) => p.symbol === tickerSymbol),
+				expectedPhase: expectedPhase,
+				positionsForTicker: analysisPayload.portfolio?.positions?.filter((p: any) => p.symbol === tickerSymbol) || []
+			});
+
 			const res = await fetch(
 				`${import.meta.env.VITE_SUPABASE_FN_URL}/integrated-analysis`,
 				{
@@ -384,24 +476,7 @@ export function TickerPriceSearch({
 							import.meta.env.VITE_SUPABASE_ANON_KEY
 						}`,
 					},
-					body: JSON.stringify({
-						ticker: eodData?.symbol,
-						portfolio: portfolioData,
-						charts:
-							chartData.length > 0
-								? chartData
-								: uploadState.charts.files.map((f) => ({
-										name: f.file.name,
-										analyzed: false,
-								  })),
-						chartsAnalyzed: chartData.length,
-						chartsFailed: failedCharts,
-						chartMetrics,
-						research: uploadState.research.files.map((f) => ({
-							name: f.file.name,
-						})),
-						priceContext, // Added
-					}),
+					body: JSON.stringify(analysisPayload),
 				}
 			);
 			console.log('priceContext sent:', priceContext);
@@ -422,12 +497,17 @@ export function TickerPriceSearch({
 		}
 	};
 
-	// Modified upload handlers - now store files instead of processing immediately
+	// Enhanced upload handlers - handle both CSV and image files
 	const handlePortfolioUpload = async (files: FileList) => {
 		updateUploadState('portfolio', files);
 
-		// Parse CSV files immediately
 		setIsParsingPortfolio(true);
+		console.log('📁 [PORTFOLIO UPLOAD] Starting portfolio file processing...', {
+			fileCount: files.length,
+			fileTypes: Array.from(files).map(f => f.type),
+			fileNames: Array.from(files).map(f => f.name)
+		});
+
 		try {
 			const csvFiles = Array.from(files).filter(
 				(f) =>
@@ -435,32 +515,149 @@ export function TickerPriceSearch({
 					f.type === 'text/csv'
 			);
 
+			const imageFiles = Array.from(files).filter(
+				(f) => f.type.startsWith('image/')
+			);
+
+			console.log('📊 [PORTFOLIO UPLOAD] File categorization:', {
+				csvCount: csvFiles.length,
+				imageCount: imageFiles.length
+			});
+
+			let portfolioResult: PortfolioParseResult | null = null;
+
+			// Handle CSV files (existing logic)
 			if (csvFiles.length > 0) {
+				console.log('📄 [CSV PROCESSING] Processing CSV files...');
 				const parser = new PortfolioCSVParser();
-				const result = await parser.parseMultipleCSVs(csvFiles);
+				portfolioResult = await parser.parseMultipleCSVs(csvFiles);
 
-				setParsedPortfolio(result);
+				console.log('✅ [CSV PROCESSING] CSV parsing completed:', {
+					positionsFound: portfolioResult.positions.length,
+					errors: portfolioResult.errors.length,
+					warnings: portfolioResult.warnings.length
+				});
 
-				// Show user feedback
-				if (result.errors.length > 0) {
-					console.error('Portfolio parsing errors:', result.errors);
-					// TODO: Show errors in UI
+				setParsedPortfolio(portfolioResult);
+
+				if (portfolioResult.errors.length > 0) {
+					console.error('❌ [CSV PROCESSING] Portfolio parsing errors:', portfolioResult.errors);
 				}
-				if (result.warnings.length > 0) {
-					console.warn(
-						'Portfolio parsing warnings:',
-						result.warnings
-					);
+				if (portfolioResult.warnings.length > 0) {
+					console.warn('⚠️ [CSV PROCESSING] Portfolio parsing warnings:', portfolioResult.warnings);
 				}
-
-				console.log(
-					`Parsed ${result.positions.length} positions from ${csvFiles.length} file(s)`
-				);
 			}
+
+			// Handle image files (NEW: Portfolio Vision Analysis)
+			if (imageFiles.length > 0) {
+				console.log('🖼️ [PORTFOLIO VISION] Processing portfolio images...');
+				
+				for (const imageFile of imageFiles) {
+					try {
+						console.log(`🔍 [PORTFOLIO VISION] Analyzing image: ${imageFile.name} (${imageFile.type})`);
+						
+						const base64 = await convertFileToBase64(imageFile);
+						console.log(`📷 [PORTFOLIO VISION] Image converted to base64: ${base64.substring(0, 50)}...`);
+
+						// Call the new portfolio-vision function
+						const visionResponse = await fetch(
+							`${import.meta.env.VITE_SUPABASE_FN_URL}/portfolio-vision`,
+							{
+								method: 'POST',
+								headers: {
+									'Content-Type': 'application/json',
+									'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+								},
+								body: JSON.stringify({
+									image: base64,
+									ticker: eodData?.symbol || 'UNKNOWN'
+								}),
+							}
+						);
+
+						const visionData = await visionResponse.json();
+						console.log('🤖 [PORTFOLIO VISION] AI Response:', {
+							success: visionData.success,
+							portfolioDetected: visionData.portfolio?.portfolioDetected,
+							positionCount: visionData.portfolio?.positions?.length || 0,
+							totalValue: visionData.portfolio?.totalValue,
+							confidence: visionData.portfolio?.extractionConfidence,
+							brokerageType: visionData.portfolio?.brokerageType
+						});
+
+						if (visionData.success && visionData.portfolio?.portfolioDetected) {
+							console.log('✅ [PORTFOLIO VISION] Portfolio detected in image!');
+							console.log('📈 [STOCK POSITIONS] Extracted stock positions:', visionData.portfolio.positions);
+							console.log('📊 [OPTION POSITIONS] Extracted option positions:', visionData.portfolio.metadata?.optionPositions);
+
+							// Convert vision data to our PortfolioParseResult format
+							const stockPositions = (visionData.portfolio.positions || []).map((pos: any) => ({
+								symbol: pos.symbol,
+								quantity: pos.quantity,
+								purchasePrice: pos.purchasePrice,
+								currentPrice: pos.currentPrice,
+								marketValue: pos.marketValue,
+								percentOfPortfolio: (pos.marketValue / visionData.portfolio.totalValue) * 100
+							}));
+
+							const visionPortfolioResult: PortfolioParseResult = {
+								positions: stockPositions,
+								totalValue: visionData.portfolio.totalValue,
+								errors: [],
+								warnings: visionData.portfolio.extractionConfidence === 'low' ? 
+									['Low confidence in data extraction - please verify positions'] : [],
+								metadata: {
+									source: 'image_analysis',
+									brokerageType: visionData.portfolio.brokerageType,
+									extractionConfidence: visionData.portfolio.extractionConfidence,
+									fileName: imageFile.name,
+									optionPositions: visionData.portfolio.metadata?.optionPositions || []
+								}
+							};
+
+							// If we don't have CSV data, use the vision data
+							if (!portfolioResult) {
+								portfolioResult = visionPortfolioResult;
+								setParsedPortfolio(portfolioResult);
+							} else {
+								// Merge with existing CSV data if available
+								console.log('📊 [DATA MERGE] Merging CSV and image data...');
+								// For now, prioritize CSV data but log both
+								console.log('🔄 [DATA MERGE] CSV positions:', portfolioResult.positions.length);
+								console.log('🔄 [DATA MERGE] Image positions:', visionPortfolioResult.positions.length);
+							}
+						} else {
+							console.log('❌ [PORTFOLIO VISION] No portfolio detected in image or analysis failed');
+							if (visionData.portfolio?.extractionNotes) {
+								console.log('📝 [PORTFOLIO VISION] Notes:', visionData.portfolio.extractionNotes);
+							}
+						}
+					} catch (imageError) {
+						console.error('💥 [PORTFOLIO VISION] Error processing image:', imageFile.name, imageError);
+					}
+				}
+			}
+
+			// Final summary
+			if (portfolioResult) {
+				console.log('🎉 [PORTFOLIO UPLOAD] Final portfolio data:', {
+					totalPositions: portfolioResult.positions.length,
+					totalValue: portfolioResult.totalValue,
+					source: portfolioResult.metadata?.source || 'csv'
+				});
+			} else {
+				console.log('❌ [PORTFOLIO UPLOAD] No portfolio data extracted from any files');
+			}
+
 		} catch (error) {
-			console.error('Failed to parse portfolio files:', error);
+			console.error('💥 [PORTFOLIO UPLOAD] Failed to process portfolio files:', error);
 		} finally {
 			setIsParsingPortfolio(false);
+			// 🎯 CRITICAL: Unlock portfolio tab after all processing is complete
+			setUploadState(prev => ({
+				...prev,
+				portfolio: { ...prev.portfolio, status: 'ready' as const } // unlock when done
+			}));
 		}
 	};
 

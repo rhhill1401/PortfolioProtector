@@ -61,7 +61,14 @@ Deno.serve(async (req) => {
 
   interface PriceContext {
     current: number | null;
+    open: number | null;
+    high: number | null;
+    low: number | null;
+    close: number | null;
+    volume: number | null;
+    date: string | null;
     timeframe: string;
+    rangeDays?: number;
   }
 
   let body:
@@ -108,10 +115,83 @@ Deno.serve(async (req) => {
 
 
   const currentPrice = priceContext?.current || 0;
+  const openPrice = priceContext?.open || 0;
+  const highPrice = priceContext?.high || 0;
+  const lowPrice = priceContext?.low || 0;
+  const closePrice = priceContext?.close || 0;
+  const volume = priceContext?.volume || 0;
   
   // Find nearest support and resistance
   const nearestSupport = supports.find(s => s.price < currentPrice) || supports[0];
   const nearestResistance = resistances.find(r => r.price > currentPrice) || resistances[0];
+
+  // 🎯 WHEEL STRATEGY ANALYSIS - Detect portfolio position and wheel phase
+  const hasPosition = portfolio?.positions?.some(p => p.symbol === ticker) || false;
+  const currentShares = portfolio?.positions?.find(p => p.symbol === ticker)?.quantity || 0;
+  const costBasis = portfolio?.positions?.find(p => p.symbol === ticker)?.purchasePrice || currentPrice;
+  const shareContracts = Math.floor(currentShares / 100);
+  
+  // 📊 EXTRACT ACTUAL OPTION POSITIONS from portfolio metadata
+  const optionPositions = portfolio?.metadata?.optionPositions || [];
+  const currentOptionPositions = optionPositions.filter((opt: any) => 
+    opt.symbol && opt.symbol.startsWith(ticker));
+  
+  console.log('🔍 [WHEEL ANALYSIS] Portfolio analysis:', {
+    ticker,
+    hasPosition,
+    currentShares,
+    optionPositionsFound: currentOptionPositions.length,
+    allOptionPositions: optionPositions.length
+  });
+
+  // 🚨 CRITICAL DEBUG: Log exact portfolio structure received
+  console.log('🚨 [DEBUG] EXACT PORTFOLIO STRUCTURE RECEIVED:', JSON.stringify({
+    portfolio: portfolio,
+    hasPortfolioKey: !!portfolio,
+    portfolioType: typeof portfolio,
+    portfolioKeys: portfolio ? Object.keys(portfolio) : 'no portfolio',
+    hasPositions: !!(portfolio?.positions),
+    positionsLength: portfolio?.positions?.length || 0,
+    hasMetadata: !!(portfolio?.metadata),
+    metadataKeys: portfolio?.metadata ? Object.keys(portfolio.metadata) : 'no metadata',
+    optionPositionsFromMetadata: portfolio?.metadata?.optionPositions?.length || 0,
+    firstOptionPosition: portfolio?.metadata?.optionPositions?.[0] || 'none'
+  }, null, 2));
+  
+  if (currentOptionPositions.length > 0) {
+    console.log('📊 [CURRENT OPTIONS] Found existing option positions:', currentOptionPositions);
+  }
+  
+  // Calculate wheel-relevant strike zones
+  const callStrikeZone = resistances.filter(r => r.price > currentPrice * 1.02); // 2%+ OTM calls
+  const putStrikeZone = supports.filter(s => s.price < currentPrice * 0.98); // 2%+ OTM puts
+  
+  // Estimate implied volatility rank (simplified calculation based on price range)
+  const priceRange = highPrice - lowPrice;
+  const avgPrice = (highPrice + lowPrice) / 2;
+  const volatilityEstimate = avgPrice > 0 ? (priceRange / avgPrice) * 100 : 20;
+  const ivRank = Math.min(Math.max(volatilityEstimate * 2, 20), 80); // Rough IV rank estimate
+  
+  // Calculate wheel cycle metrics
+  const wheelPhase = hasPosition ? 'COVERED_CALL' : 'CASH_SECURED_PUT';
+  const optimalStrike = hasPosition 
+    ? (callStrikeZone[0]?.price || currentPrice * 1.05) 
+    : (putStrikeZone[putStrikeZone.length - 1]?.price || currentPrice * 0.95);
+  
+  console.log('🎯 [WHEEL STRATEGY DEBUG] Analysis Input:', {
+    ticker,
+    currentPrice,
+    hasPosition,
+    currentShares,
+    costBasis,
+    wheelPhase,
+    optimalStrike,
+    callStrikeZone: callStrikeZone.map(r => r.price),
+    putStrikeZone: putStrikeZone.map(s => s.price),
+    portfolioValue: portfolio?.totalValue,
+    ivRank,
+    volatilityEstimate
+  });
   
   // Extract chart metrics
   const firstMetric = (chartMetrics as ChartMetric[])[0];
@@ -125,146 +205,98 @@ Deno.serve(async (req) => {
       `${p.symbol}: ${p.quantity} shares @ $${p.purchasePrice || 'N/A'}`
     ).join(', ') : 'No current positions';
 
-  // Build comprehensive prompt
+  // Build comprehensive WHEEL STRATEGY prompt
   const prompt = `
-You are an elite swing‑trade analyst. Provide **exact** entry/exit analysis using ONLY the price levels below.
+You are an AI Financial Analyst specializing in The Wheel Strategy.
 
-REAL‑TIME CONTEXT
+PORTFOLIO DATA:
 • Ticker: ${ticker}
-• Current price: $${currentPrice.toFixed(2)}
-• Chart timeframe: ${priceContext?.timeframe ?? "Unknown"}
-• Key levels: ${lvlSummary}
+• Current Price: $${currentPrice.toFixed(2)}
+• Share Position: ${hasPosition ? `${currentShares} shares @ $${costBasis.toFixed(2)}` : 'No shares owned'}
+• Wheel Phase: ${wheelPhase}
+• Portfolio Value: $${portfolio?.totalValue?.toLocaleString() || 'Unknown'}
 
-KEY PRICE LEVELS:
-Resistances: ${resistances.map(r => `$${r.price.toFixed(2)} (${r.strength})`).join(', ')}
-Supports: ${supports.map(s => `$${s.price.toFixed(2)} (${s.strength})`).join(', ')}
+${currentOptionPositions.length > 0 ? 
+`UPLOADED OPTION POSITIONS (${currentOptionPositions.length} positions):
+${currentOptionPositions.map((opt: unknown, index: number) => {
+  const position = opt as Record<string, unknown>;
+  return `${index + 1}. $${position.strike} ${position.optionType} expiring ${position.expiry}, ${Math.abs(Number(position.contracts))} contracts, Premium: $${position.premiumCollected || 'Unknown'}, P&L: $${position.profitLoss || 'Unknown'}`;
+}).join('\n')}
 
-TECHNICAL INDICATORS:
-- RSI: ${rsi}
-- MACD: ${macd}
-- Trend: ${trend}
+TASK: Analyze these ACTUAL uploaded positions. Calculate real performance metrics, assignment probabilities, and specific recommendations for each position.` 
+: 
+`No option positions detected. Generate wheel strategy recommendations.`}
 
-PORTFOLIO:
-- Positions: ${portfolioSummary}
-- Total Value: $${portfolio?.totalValue?.toLocaleString() || 'Unknown'}
+TECHNICAL DATA:
+• RSI: ${rsi}, MACD: ${macd}, Trend: ${trend}
+• Available Strike Prices: ${[...resistances.map(r => r.price), ...supports.map(s => s.price)].join(', ')}
 
-ANALYSIS CONTEXT:
-- Charts analyzed: ${charts.length}
-- Research documents: ${research.length}
-- Current price is ${nearestSupport ? `$${(currentPrice - nearestSupport.price).toFixed(2)} above support at $${nearestSupport.price.toFixed(2)}` : 'below all supports'}
-- Next resistance at ${nearestResistance ? `$${nearestResistance.price.toFixed(2)} (+${((nearestResistance.price - currentPrice) / currentPrice * 100).toFixed(1)}%)` : 'above all resistances'}
-
-CRITICAL RULES:
-1. Every entry must be *at or above the listed Supports* and every exit at *one of the listed Resistances*. Never invent new prices.
-2. Exit prices MUST be at resistance levels: ${resistances.map(r => `$${r.price.toFixed(2)}`).join(', ')}
-3. Stop loss = support price minus 1-2%
-4. All prices must be exact numbers from the lists above
-5. Calculate risk/reward using actual price differences
-
-Output this EXACT JSON structure with REAL NUMBERS:
+Return this JSON structure:
 {
+  "wheelStrategy": {
+    "currentPhase": "${wheelPhase}",
+    "currentPositions": [${currentOptionPositions.length > 0 ? 
+      currentOptionPositions.map((opt: unknown) => {
+        const position = opt as Record<string, unknown>;
+        return `{
+        "strike": ${position.strike || 0},
+        "expiry": "${position.expiry || 'Unknown'}",
+        "type": "${position.optionType || 'CALL'}",
+        "contracts": ${Math.abs(Number(position.contracts)) || 1},
+        "premium": ${position.premiumCollected || 0},
+        "currentValue": ${position.currentValue || 0},
+        "profitLoss": ${position.profitLoss || 0},
+        "analysis": "Calculate: profitable/losing, assignment risk, recommended action",
+        "nextAction": "Hold/Roll/Close with specific reasoning"
+      }`;
+      }).join(',\n      ')
+      :
+      `{
+        "strike": ${hasPosition ? (resistances.find(r => r.price > currentPrice)?.price || currentPrice * 1.05) : (supports.find(s => s.price < currentPrice)?.price || currentPrice * 0.95)},
+        "type": "${hasPosition ? 'CALL' : 'PUT'}",
+        "contracts": ${Math.floor(currentShares / 100) || 1},
+        "reasoning": "Recommended position based on current holdings"
+      }`
+    }]
+  },
   "summary": {
     "currentPrice": ${currentPrice},
-    "priceChange": 0,
-    "priceChangePercent": "0%",
-    "vix": 18.5,
-    "overallAssessment": "${rsi < 30 ? 'Oversold Bounce' : rsi > 70 ? 'Overbought' : 'Neutral'}",
-    "technicalStance": "${trend} trend, RSI ${rsi}",
-    "technicalDetail": "Price at $${currentPrice.toFixed(2)}, ${nearestSupport ? `support at $${nearestSupport.price.toFixed(2)}` : 'no nearby support'}",
-    "fundamentalAssessment": "Based on ${research.length} research documents",
-    "fundamentalDetail": "Portfolio exposure: ${portfolio?.positions?.length || 0} positions",
-    "marketContext": "Swing trade setup",
-    "marketContextDetail": "${trend} trend with ${macd} MACD divergence",
-    "investmentThesis": ["Technical bounce play", "Risk/reward favorable at support", "Clear stop loss level"],
-    "bullCase": ["RSI oversold bounce", "Support holding"],
-    "bearCase": ["MACD still ${macd}", "Resistance overhead"],
-    "positionManagement": ["Use trailing stop above entry", "Scale out at resistance levels"],
-    "entryTriggers": ["Limit order at support", "Confirm with volume"]
+    "wheelPhase": "${wheelPhase}",
+    "overallAssessment": "${currentOptionPositions.length > 0 ? 'Analysis of actual option positions performance' : 'Wheel strategy recommendations for new positions'}"
   },
-  "opportunity": "${nearestSupport ? `Entry at $${nearestSupport.price.toFixed(2)} support with ${((nearestResistance.price - nearestSupport.price) / nearestSupport.price * 100).toFixed(1)}% upside to resistance` : 'Wait for pullback to support'}",
-  "risk": "Stop at $${nearestSupport ? (nearestSupport.price * 0.98).toFixed(2) : (currentPrice * 0.95).toFixed(2)} (${nearestSupport ? '2% below support' : '5% stop loss'})",
-  "confidence": ${rsi < 30 && nearestSupport ? 8 : rsi > 70 ? 4 : 6},
   "recommendation": [
-    {"name": "Buy", "value": ${rsi < 30 && nearestSupport ? 70 : 30}},
-    {"name": "Hold", "value": ${rsi >= 30 && rsi <= 70 ? 50 : 20}},
-    {"name": "Sell", "value": ${rsi > 70 ? 50 : 10}}
+    {"name": "${hasPosition ? 'Sell Calls' : 'Sell Puts'}", "value": 7},
+    {"name": "Wait", "value": 2},
+    {"name": "Close Position", "value": 1}
   ],
-  "detail": {
-    "technicalSignals": "${trend} trend with RSI at ${rsi}",
-    "portfolioAlignment": "${portfolio?.positions?.length ? 'Adding to existing positions' : 'New position'}",
-    "researchConsensus": "Based on ${research.length} documents analyzed"
-  },
   "technicalFactors": [
     {
-      "factor": "Primary Support",
-      "value": "$${nearestSupport ? nearestSupport.price.toFixed(2) : 'N/A'}",
-      "interpretation": "${nearestSupport ? nearestSupport.strength + ' support level' : 'No support identified'}",
-      "impact": "${nearestSupport && currentPrice > nearestSupport.price ? 'Bullish' : 'Bearish'}",
-      "score": ${nearestSupport ? 7 : 3}
-    },
-    {
-      "factor": "RSI",
-      "value": "${rsi}",
-      "interpretation": "${rsi < 30 ? 'Oversold' : rsi > 70 ? 'Overbought' : 'Neutral'}",
-      "impact": "${rsi < 30 ? 'Bullish' : rsi > 70 ? 'Bearish' : 'Neutral'}",
-      "score": ${rsi < 30 ? 8 : rsi > 70 ? 3 : 5}
-    }
-  ],
-  "fundamentals": [
-    {
-      "metric": "Portfolio Weight",
-      "value": "${portfolio?.positions?.find(p => p.symbol === ticker)?.percentOfPortfolio?.toFixed(1) || '0'}%",
-      "assessment": "${portfolio?.positions?.find(p => p.symbol === ticker) ? 'Existing position' : 'New position'}",
-      "comparison": "vs portfolio total"
+      "factor": "Strike Selection",
+      "value": "USE ONLY PROVIDED PRICES",
+      "interpretation": "Calculate percentage out-of-the-money",
+      "impact": "Assess risk/reward",
+      "score": "Rate 1-10"
     }
   ],
   "entryPoints": [
     {
-      "zone": "Primary Support",
-      "price": "$${nearestSupport ? nearestSupport.price.toFixed(2) : (currentPrice * 0.95).toFixed(2)}",
-      "timing": "Limit order",
-      "rationale": "${nearestSupport ? nearestSupport.strength + ' support level' : 'Technical entry'}",
-      "probability": "${nearestSupport ? '70%' : '50%'}"
-    }${supports.length > 1 ? `,
-    {
-      "zone": "Secondary Support",
-      "price": "$${supports[1].price.toFixed(2)}",
-      "timing": "If breaks first support",
-      "rationale": "${supports[1].strength} support level",
-      "probability": "30%"
-    }` : ''}
+      "zone": "${hasPosition ? 'Covered Call Strike' : 'Cash-Secured Put Strike'}",
+      "price": "SELECT FROM PROVIDED RESISTANCE/SUPPORT LEVELS",
+      "timing": "45 days to expiration",
+      "rationale": "Explain selection based on technical levels"
+    }
   ],
   "exitPoints": [
     {
-      "target": "First Resistance",
-      "price": "$${nearestResistance ? nearestResistance.price.toFixed(2) : (currentPrice * 1.05).toFixed(2)}",
-      "gain": "${nearestResistance ? ((nearestResistance.price - currentPrice) / currentPrice * 100).toFixed(1) : '5.0'}%",
-      "timeframe": "1-2 weeks",
-      "probability": "60%"
-    }${resistances.length > 1 ? `,
-    {
-      "target": "Major Resistance",
-      "price": "$${resistances[resistances.length - 1].price.toFixed(2)}",
-      "gain": "${((resistances[resistances.length - 1].price - currentPrice) / currentPrice * 100).toFixed(1)}%",
-      "timeframe": "2-4 weeks",
-      "probability": "40%"
-    }` : ''}
+      "target": "50% Profit Target",
+      "gain": "50% of max profit",
+      "timeframe": "20-25 days"
+    }
   ],
-  "keyLevels": ${JSON.stringify(keyLevels)},
   "actionPlan": [
-    "Place limit buy at $${nearestSupport ? nearestSupport.price.toFixed(2) : (currentPrice * 0.95).toFixed(2)}",
-    "Set stop loss at $${nearestSupport ? (nearestSupport.price * 0.98).toFixed(2) : (currentPrice * 0.93).toFixed(2)}",
-    "Target 1: $${nearestResistance ? nearestResistance.price.toFixed(2) : (currentPrice * 1.05).toFixed(2)} (partial exit)",
-    "${resistances.length > 1 ? `Target 2: $${resistances[resistances.length - 1].price.toFixed(2)} (final exit)` : 'Trail stop for remaining position'}"
+    "Specific wheel strategy action using provided prices only"
   ],
-  "optionsStrategy": "${nearestSupport && nearestResistance ? `Bull call spread: Buy ${ticker} ${new Date(Date.now() + 90*24*60*60*1000).toLocaleDateString('en-US', {month: 'short', year: 'numeric'})} ${Math.round(nearestSupport.price / 5) * 5}C / Sell ${Math.round(nearestResistance.price / 5) * 5}C` : 'Wait for better setup'}",
-  "marketContext": "${trend} market with ${macd} momentum",
-  "technical": {
-    "trend": "${trend}",
-    "rsi": "${rsi}",
-    "macd": "${macd}",
-    "movingAverages": "Price ${currentPrice > nearestSupport?.price ? 'above' : 'below'} key support"
-  }
+  "optionsStrategy": "Describe specific ${hasPosition ? 'covered call' : 'cash-secured put'} recommendation"
 }`;
 
   /* ---------- OpenAI call ---------- */
@@ -311,19 +343,55 @@ Output this EXACT JSON structure with REAL NUMBERS:
       let analysis;
       try {
         analysis = JSON.parse(txt);
+        
+        // 🎯 WHEEL STRATEGY RESPONSE LOGGING
+        console.log('🎯 [WHEEL RESPONSE DEBUG] AI Generated:', {
+          wheelPhase: analysis.wheelStrategy?.currentPhase,
+          currentPositions: analysis.wheelStrategy?.currentPositions,
+          wheelPerformance: analysis.wheelStrategy?.wheelPerformance,
+          assignmentAnalysis: analysis.wheelStrategy?.assignmentAnalysis,
+          cycleReturn: analysis.wheelStrategy?.currentPositions?.[0]?.cycleReturn,
+          optionsStrategy: analysis.optionsStrategy,
+          overallAssessment: analysis.summary?.overallAssessment,
+          keyMessage: analysis.summary?.keyMessage
+        });
+        
       } catch (err) {
         console.error("Failed to parse AI response:", txt);
         console.error("Parse error details:", err);
         throw new Error("Invalid JSON response from AI");
       }
 
-      /* ───────── Numeric validator (NEW) ───────── */
+      /* ───────── Numeric validator (patched) ───────── */
       {
         // 1 – build the whitelist of legal prices
+        const optionStrikes = currentOptionPositions.map(p => Number(p.strike));
+        
+        // Extract all numeric values from option positions
+        const optionNumericValues = currentOptionPositions.flatMap(p => {
+          const values = [];
+          
+          // Add per-share values
+          if (typeof p.premiumCollected === 'number') values.push(p.premiumCollected);
+          if (typeof p.currentValue === 'number') values.push(p.currentValue);
+          
+          // Add total P&L values (these are often larger)
+          if (typeof p.profitLoss === 'number') values.push(p.profitLoss);
+          
+          // Also add potential calculated values (per-contract values)
+          const contracts = Math.abs(Number(p.contracts)) || 1;
+          if (p.premiumCollected) values.push(p.premiumCollected * 100 * contracts);
+          if (p.currentValue) values.push(p.currentValue * 100 * contracts);
+          
+          return values;
+        }).filter((n): n is number => !isNaN(n));
+        
         const allowed = new Set<number>([
           currentPrice,
           ...supports.map(s => s.price),
           ...resistances.map(r => r.price),
+          ...optionStrikes,          // ← Allow actual option strikes from uploaded portfolio
+          ...optionNumericValues     // ← Allow all numeric values from options (premiums, P&L, etc.)
         ]);
 
         // 2 – scan every number appearing in the JSON string

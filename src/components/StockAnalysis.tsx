@@ -116,6 +116,31 @@ interface AnalysisDetail {
 	researchConsensus?: string;
 }
 
+// Wheel Strategy specific interfaces
+interface WheelPosition {
+	strike: number;
+	expiry: string;
+	type: 'Call' | 'Put';
+	contracts: number;
+	premium: number;
+	cycleReturn: string;
+	status: string;
+	assignmentProb: string;
+	nextAction: string;
+}
+
+interface WheelStrategy {
+	currentPhase: 'CASH_SECURED_PUT' | 'COVERED_CALL';
+	currentPositions: WheelPosition[];
+	wheelPerformance?: Array<{
+		position: string;
+		target: number;
+		actual: number;
+		excess: number;
+		status: string;
+	}>;
+}
+
 interface StockAnalysisData {
 	summary: AnalysisSummary;
 	opportunity?: string; // NEW – from integrated‑analysis
@@ -134,6 +159,7 @@ interface StockAnalysisData {
 	recommendation: RecommendationDataPoint[];
 	confidence?: number;
 	additionalDataNeeded?: string;
+	wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
 }
 
 // --- Remove or comment out Mock Data ---
@@ -294,6 +320,68 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 
 	useEffect(() => {
 		const handler = (e: CustomEvent<{[key: string]: unknown}>) => {
+			console.log('🔍 [AI RESPONSE DEBUG] Raw AI Response Received:', {
+				timestamp: new Date().toISOString(),
+				fullResponse: e.detail,
+				responseType: typeof e.detail,
+				responseKeys: e.detail ? Object.keys(e.detail) : 'null/undefined'
+			});
+			
+			// Deep log the structure
+			if (e.detail && typeof e.detail === 'object') {
+				console.log('📊 [AI RESPONSE STRUCTURE]', {
+					hasRecommendation: !!e.detail.recommendation,
+					hasTechnicalFactors: !!e.detail.technicalFactors,
+					hasEntryPoints: !!e.detail.entryPoints,
+					hasExitPoints: !!e.detail.exitPoints,
+					hasActionPlan: !!e.detail.actionPlan,
+					hasOptionsStrategy: !!e.detail.optionsStrategy,
+					hasWheelAnalysis: !!e.detail.wheelAnalysis,
+					hasDashboardMetrics: !!e.detail.dashboardMetrics,
+					allKeys: Object.keys(e.detail)
+				});
+				
+				// Log specific sections that might be wheel-related
+				if (e.detail.optionsStrategy) {
+					console.log('⚙️ [OPTIONS STRATEGY]', e.detail.optionsStrategy);
+				}
+				if (e.detail.recommendation) {
+					console.log('💡 [RECOMMENDATION]', e.detail.recommendation);
+				}
+				if (e.detail.actionPlan) {
+					console.log('📋 [ACTION PLAN]', e.detail.actionPlan);
+				}
+				if (e.detail.technicalFactors) {
+					console.log('📈 [TECHNICAL FACTORS]', e.detail.technicalFactors);
+				}
+			}
+			
+			// 🎯 CRITICAL: Log the wheel strategy data when it arrives
+			console.log('🚀🚀🚀 [WHEEL STRATEGY DATA RECEIVED]', {
+				timestamp: new Date().toISOString(),
+				hasWheelStrategy: !!e.detail.wheelStrategy,
+				wheelPhase: e.detail.wheelStrategy?.currentPhase,
+				positions: e.detail.wheelStrategy?.currentPositions,
+				fullWheelData: e.detail.wheelStrategy
+			});
+
+			// 🔍 VERIFY: Does AI see your actual portfolio positions?
+			if (e.detail.wheelStrategy?.currentPositions && e.detail.wheelStrategy.currentPositions.length > 0) {
+				console.log('✅ [AI SEES YOUR POSITIONS]', {
+					positionCount: e.detail.wheelStrategy.currentPositions.length,
+					firstPosition: e.detail.wheelStrategy.currentPositions[0],
+					allStrikes: e.detail.wheelStrategy.currentPositions.map(p => p.strike),
+					allReturns: e.detail.wheelStrategy.currentPositions.map(p => p.cycleReturn),
+					wheelPhase: e.detail.wheelStrategy.currentPhase
+				});
+			} else {
+				console.log('❌ [AI DEFAULTING TO GENERIC] No specific positions found in AI response:', {
+					hasWheelStrategy: !!e.detail.wheelStrategy,
+					wheelStrategyKeys: e.detail.wheelStrategy ? Object.keys(e.detail.wheelStrategy) : 'none',
+					recommendationInstead: e.detail.recommendation || 'none'
+				});
+			}
+			
 			setAnalysisData(e.detail); // fills tabs
 		};
 		window.addEventListener('analysis-ready', handler as EventListener);
@@ -484,176 +572,161 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 						</div>
 					)}
 					{/* Tabs */}
-					<Tabs defaultValue='recommendation' className='w-full'>
+					<Tabs defaultValue='performance' className='w-full'>
 						{/* Styling to match the light gray image reference */}
-						<TabsList className='grid w-full grid-cols-4 mb-4 bg-gray-100 rounded-lg p-1'>
+						<TabsList className='grid w-full grid-cols-5 mb-4 bg-gray-100 rounded-lg p-1'>
 							{/* Styling for triggers */}
 							<TabsTrigger
-								value='recommendation'
+								value='performance'
 								className='data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-500 rounded-md py-1.5 text-sm font-medium focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none'>
-								Recommendation
+								Performance Analysis
 							</TabsTrigger>
 							<TabsTrigger
-								value='technical'
+								value='wheel-execution'
 								className='data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-500 rounded-md py-1.5 text-sm font-medium focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none'>
-								Technical Analysis
+								Wheel Execution
 							</TabsTrigger>
 							<TabsTrigger
-								value='fundamental'
+								value='assignment-success'
 								className='data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-500 rounded-md py-1.5 text-sm font-medium focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none'>
-								Fundamentals
+								Assignment Success
 							</TabsTrigger>
 							<TabsTrigger
-								value='strategy'
+								value='continuation-plan'
 								className='data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-500 rounded-md py-1.5 text-sm font-medium focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none'>
-								Entry/Exit Strategy
+								Continuation Plan
+							</TabsTrigger>
+							<TabsTrigger
+								value='market-context'
+								className='data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-500 rounded-md py-1.5 text-sm font-medium focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none'>
+								Market Context
 							</TabsTrigger>
 						</TabsList>
 
-						{/* Recommendation Tab Content */}
+						{/* Performance Analysis Tab Content */}
 						<TabsContent
-							value='recommendation'
+							value='performance'
 							className='space-y-4'>
+							{/* DEBUG: Log wheel strategy data */}
+							{console.log('🎯 [PERFORMANCE TAB] Rendering with data:', {
+								hasAnalysisData: !!analysisData,
+								hasWheelStrategy: !!analysisData?.wheelStrategy,
+								wheelStrategy: analysisData?.wheelStrategy,
+								currentPhase: analysisData?.wheelStrategy?.currentPhase,
+								positions: analysisData?.wheelStrategy?.currentPositions
+							})}
+							
+							{/* Hero Performance Card */}
 							<Card>
-								<CardHeader>
-									<CardTitle>
-										Investment Recommendation
+								<CardHeader className="bg-gradient-to-r from-green-900 to-blue-900 text-white">
+									<CardTitle className="text-xl">
+										Actual Returns vs Target - {analysisData?.wheelStrategy?.currentPositions?.[0]?.status || 'ANALYZING'}
 									</CardTitle>
-									<CardDescription>
-										Strategic buying opportunity with staged
-										entry approach
+									<CardDescription className="text-gray-200">
+										Your wheel strategy performance analysis
 									</CardDescription>
-									{analysisData?.confidence !== undefined && (
-										<span
-											className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${confidenceColor(
-												analysisData.confidence
-											)}`}>
-											Confidence:{' '}
-											{analysisData.confidence}/10
-										</span>
-									)}
 								</CardHeader>
-								<CardContent className='py-6'>
-									{analysisData?.confidence !== undefined &&
-										analysisData.confidence < 9 &&
-										analysisData.additionalDataNeeded && (
-											<div className='mb-4 rounded-md bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800'>
-												<strong>
-													More data requested:
-												</strong>{' '}
-												{
-													analysisData.additionalDataNeeded
-												}
+								<CardContent className="pt-6">
+									{analysisData?.wheelStrategy ? (
+										<>
+											{/* Performance Overview */}
+											<div className="mb-6">
+												<div className="flex items-center justify-between mb-2">
+													<span className="text-sm font-medium">Target Return</span>
+													<span className="text-sm text-gray-600">4-7% per cycle</span>
+												</div>
+												<div className="flex items-center justify-between mb-4">
+													<span className="text-sm font-medium">Actual Return</span>
+													<span className="text-lg font-bold text-green-600">
+														{analysisData.wheelStrategy.currentPositions?.[0]?.cycleReturn || '0%'}
+													</span>
+												</div>
+												{/* Performance Progress Bar */}
+												<div className="relative h-8 bg-gray-200 rounded-full overflow-hidden">
+													<div 
+														className="absolute h-full bg-gradient-to-r from-green-500 to-green-600 flex items-center justify-end pr-2"
+														style={{width: `${Math.min(parseFloat(analysisData.wheelStrategy.currentPositions?.[0]?.cycleReturn || '0') / 7 * 100, 100)}%`}}>
+														<span className="text-xs text-white font-semibold">
+															{analysisData.wheelStrategy.currentPositions?.[0]?.cycleReturn || '0%'}
+														</span>
+													</div>
+												</div>
 											</div>
-										)}
-									{/* Chart + Narrative side‑by‑side on medium screens, stacked on mobile */}
-									<div className='grid md:grid-cols-2 gap-6'>
-										{/* Pie Chart */}
-										<div className='w-full h-64 md:h-72'>
-											<ResponsiveContainer
-												width='100%'
-												height='100%'>
-												<PieChart>
-													<Pie
-														data={toPieArray(
-															displayData.recommendation
-														)} /* ensure array */
-														dataKey='value'
-														nameKey='name'
-														outerRadius={90}
-														label={({
-															name,
-															value,
-														}) =>
-															`${name}: ${value}%`
-														}>
-														{toPieArray(
-															displayData.recommendation
-														).map((_, i) => (
-															<Cell
-																key={`cell-${i}`}
-																fill={
-																	COLORS[
-																		i %
-																			COLORS.length
-																	]
-																}
-															/>
+
+											{/* Current Position Status */}
+											<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+												{/* Position Card */}
+												<Card className="border-green-200 bg-green-50">
+													<CardHeader className="pb-3">
+														<CardTitle className="text-lg">Current {analysisData.wheelStrategy.currentPhase === 'CASH_SECURED_PUT' ? 'Put' : 'Call'} Position</CardTitle>
+													</CardHeader>
+													<CardContent>
+														{analysisData.wheelStrategy.currentPositions?.map((position, idx) => (
+															<div key={idx} className="space-y-2">
+																<div className="flex justify-between">
+																	<span className="text-sm text-gray-600">Strike Price</span>
+																	<span className="font-semibold">${position.strike}</span>
+																</div>
+																<div className="flex justify-between">
+																	<span className="text-sm text-gray-600">Expiry</span>
+																	<span className="font-semibold">{position.expiry}</span>
+																</div>
+																<div className="flex justify-between">
+																	<span className="text-sm text-gray-600">Premium Collected</span>
+																	<span className="font-semibold">${position.premium}</span>
+																</div>
+																<div className="flex justify-between">
+																	<span className="text-sm text-gray-600">Contracts</span>
+																	<span className="font-semibold">{position.contracts}</span>
+																</div>
+																<div className="flex justify-between">
+																	<span className="text-sm text-gray-600">Assignment Probability</span>
+																	<span className="font-semibold">{position.assignmentProb}</span>
+																</div>
+															</div>
 														))}
-													</Pie>
-													<Tooltip />
-												</PieChart>
-											</ResponsiveContainer>
-										</div>
+													</CardContent>
+												</Card>
 
-										{/* Textual narrative */}
-										<div className='space-y-6'>
-											{analysisData ? (
-												<>
-													{/* Risk */}
-													<div>
-														<h4 className='font-semibold mb-1'>
-															Risk Overview
-														</h4>
-														<p className='text-sm'>
-															{analysisData.risk ||
-																'Risk overview unavailable.'}
-														</p>
-													</div>
-
-													{/* Options */}
-													<div>
-														<h4 className='font-semibold mb-1'>
-															Primary Options
-															Strategy
-														</h4>
-														<p className='text-sm'>
-															{analysisData.optionsStrategy ||
-																'Options strategy unavailable.'}
-														</p>
-													</div>
-
-													{/* Action Plan (first three items) */}
-													{analysisData.actionPlan
-														?.length ? (
-														<div>
-															<h4 className='font-semibold mb-1'>
-																Action Plan
-															</h4>
-															<ul className='list-disc pl-5 space-y-1 text-sm'>
-																{analysisData.actionPlan
-																	.slice(0, 3)
-																	.map(
-																		(
-																			step,
-																			idx
-																		) => (
-																			<li
-																				key={
-																					idx
-																				}>
-																				{
-																					step
-																				}
-																			</li>
-																		)
-																	)}
-															</ul>
+												{/* Metrics Card */}
+												<Card>
+													<CardHeader className="pb-3">
+														<CardTitle className="text-lg">Wheel Strategy Metrics</CardTitle>
+													</CardHeader>
+													<CardContent>
+														<div className="space-y-3">
+															<div className="flex justify-between items-center">
+																<span className="text-sm text-gray-600">Current Phase</span>
+																<span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold">
+																	{analysisData.wheelStrategy.currentPhase === 'CASH_SECURED_PUT' ? 'Cash-Secured Put' : 'Covered Call'}
+																</span>
+															</div>
+															<div className="flex justify-between">
+																<span className="text-sm text-gray-600">Position Status</span>
+																<span className={`font-semibold ${
+																	analysisData.wheelStrategy.currentPositions?.[0]?.status === 'GOOD' ? 'text-green-600' : 'text-yellow-600'
+																}`}>
+																	{analysisData.wheelStrategy.currentPositions?.[0]?.status || 'PENDING'}
+																</span>
+															</div>
+															<div className="flex justify-between">
+																<span className="text-sm text-gray-600">Next Action</span>
+																<span className="text-sm font-medium">
+																	{analysisData.wheelStrategy.currentPositions?.[0]?.nextAction || 'Awaiting analysis'}
+																</span>
+															</div>
 														</div>
-													) : null}
-												</>
-											) : (
-												<p className='text-sm text-gray-500'>
-													Recommendation details will
-													appear here once analysis
-													completes.
-												</p>
-											)}
+													</CardContent>
+												</Card>
+											</div>
+										</>
+									) : (
+										<div className="text-center py-8">
+											<p className="text-gray-500">Wheel strategy analysis will appear here once analysis completes.</p>
 										</div>
-									</div>
+									)}
 								</CardContent>
 							</Card>
-							{/* Add Market Context Card here later */}
 						</TabsContent>
 
 						{/* Technical Tab Content */}

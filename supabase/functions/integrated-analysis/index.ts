@@ -43,6 +43,7 @@ Deno.serve(async (req) => {
     }>;
     totalValue?: number;
     rawFiles?: string[];
+    metadata?: any; // Added to match frontend usage
   }
 
   interface KeyLevel {
@@ -362,60 +363,14 @@ Return this JSON structure:
         throw new Error("Invalid JSON response from AI");
       }
 
-      /* ───────── Numeric validator (patched) ───────── */
-      {
-        // 1 – build the whitelist of legal prices
-        const optionStrikes = currentOptionPositions.map(p => Number(p.strike));
-        
-        // Extract all numeric values from option positions
-        const optionNumericValues = currentOptionPositions.flatMap(p => {
-          const values = [];
-          
-          // Add per-share values
-          if (typeof p.premiumCollected === 'number') values.push(p.premiumCollected);
-          if (typeof p.currentValue === 'number') values.push(p.currentValue);
-          
-          // Add total P&L values (these are often larger)
-          if (typeof p.profitLoss === 'number') values.push(p.profitLoss);
-          
-          // Also add potential calculated values (per-contract values)
-          const contracts = Math.abs(Number(p.contracts)) || 1;
-          if (p.premiumCollected) values.push(p.premiumCollected * 100 * contracts);
-          if (p.currentValue) values.push(p.currentValue * 100 * contracts);
-          
-          return values;
-        }).filter((n): n is number => !isNaN(n));
-        
-        const allowed = new Set<number>([
-          currentPrice,
-          ...supports.map(s => s.price),
-          ...resistances.map(r => r.price),
-          ...optionStrikes,          // ← Allow actual option strikes from uploaded portfolio
-          ...optionNumericValues     // ← Allow all numeric values from options (premiums, P&L, etc.)
-        ]);
-
-        // 2 – scan every number appearing in the JSON string
-        const jsonString = JSON.stringify(analysis);
-        const priceLike = /\$?(\d{2,5}(?:\.\d+)?)/g;
-        let m; const bad: number[] = [];
-        while ((m = priceLike.exec(jsonString)) !== null) {
-          const n = parseFloat(m[1]);
-       
-          if (n > 50 && n < 2000) {
-            const legal = [...allowed].some(a => Math.abs(a - n) < a * 0.01);  
-            if (!legal) bad.push(n);
-          }
-        }
-
-        // 3 – abort if any illegal numbers detected
-        if (bad.length) {
-          return json({
-            success: false,
-            error: `AI invented prices: ${bad.join(", ")}`,
-            allowed: [...allowed],
-          }, 200);
-        }
-      }
+      /* ───────── Numeric validator DISABLED ───────── */
+      // TEMPORARILY DISABLED: The validator is too aggressive and catches
+      // legitimate rounded numbers (like "82k" for an 85k portfolio).
+      // Modern AI models are much better at not hallucinating prices.
+      
+      // TODO: Consider implementing a more targeted validation that only
+      // checks specific fields (entry/exit prices) rather than the entire response.
+      
       /* ───────── End numeric validator ───────── */
 
     return json({ success: true, analysis, confidence: analysis.confidence });

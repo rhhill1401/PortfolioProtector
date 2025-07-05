@@ -77,6 +77,7 @@ interface ChartAnalysisResult {
 	fileName: string;
 	analysis: {
 		marketContext: string;
+		keyLevels?: KeyLevel[]; // Added to match chart-vision response
 		technical: {
 			trend: string;
 			rsi: string;

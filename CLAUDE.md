@@ -120,3 +120,12 @@ VITE_SUPABASE_FN_URL=your_functions_url
 
 ## Troubleshooting Tips
 - For any troubleshooting, always use Puppeteer to navigate to localhost:5173
+
+## Code Review Standards
+- After implementing any solution, refer to `/docs/CODE_REVIEW_STANDARDS.md`
+- Always follow the "Upgrade, Don't Replace" philosophy
+- Search for existing implementations before creating new code
+- Ensure all changes meet the code review checklist
+
+## Memories
+- Perfect what every you did to get that to work remember before we make our next tweeks

@@ -129,3 +129,46 @@ VITE_SUPABASE_FN_URL=your_functions_url
 
 ## Memories
 - Perfect what every you did to get that to work remember before we make our next tweeks
+
+## Options Trading Lessons Learned (2025-07-05)
+
+### Critical Data Format Requirements
+1. **Contract Signs**: 
+   - Negative contracts = SHORT/SOLD positions (e.g., -1, -4, -5)
+   - Positive contracts = LONG/BOUGHT positions
+   - NEVER use Math.abs() on contract values - the sign carries meaning!
+
+2. **Terminology Clarity**:
+   - Position direction: SHORT (sold) vs LONG (bought)
+   - Term length: Short-dated (≤365 days) vs Long-dated (>365 days)
+   - NEVER use "short calls" when you mean "sold calls" - be explicit
+
+3. **Data Field Handling**:
+   - Always calculate `daysToExpiry` from expiry date if missing
+   - Check both `premium` and `premiumCollected` fields
+   - Add fallback calculations for any missing fields
+
+4. **Premium Calculations**:
+   - Formula: premium × 100 × |contracts|
+   - Premium is per share, but collected per contract (100 shares)
+   - Always use absolute value of contracts for quantity
+
+5. **Backend Response Format**:
+   - integrated-analysis must preserve negative contract values
+   - portfolio-vision should calculate daysToExpiry and term
+   - Always deploy edge functions immediately after changes
+
+### Performance Tab Implementation Status
+✅ Completed:
+- Position Status card with share count and contract breakdown
+- IV Environment card with VIX data
+- Assignment Risk card
+- Current Positions display with risk-based colors
+- Premium calculations
+- Days to expiry calculations
+- Term classification (short-dated/long-dated)
+- Proper SHORT/LONG position labeling
+
+❌ Not Implemented (Optional Phase 6):
+- Options Greeks chart showing assignment probabilities
+- Wheel Execution, Assignment Success, Continuation Plan tab content

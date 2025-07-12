@@ -1,4 +1,4 @@
-import {useState, useEffect, useRef} from 'react';
+import {useState, useEffect, useRef, useMemo} from 'react';
 import {
 	Card,
 	CardContent,
@@ -8,16 +8,21 @@ import {
 } from '@/components/ui/card';
 import {Progress} from '@/components/ui/progress';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
-// Import recharts components (make sure recharts is installed: yarn add recharts)
-import {PieChart, Pie, Cell, Tooltip, ResponsiveContainer} from 'recharts';
-import axios from 'axios'; // Make sure axios is installed
+import axios from 'axios';
+import { useOptionChain } from '@/hooks/useOptionChain';
+import { useWheelQuotes } from '@/hooks/useWheelQuotes';
+import { 
+	cycleCredit, 
+	grossYield,
+	compounding,
+	estimateAssignmentProb
+} from '@/services/wheelMath';
+import { calculateAggregateMetrics } from '@/services/optionLookup';
 
-// Define the props the component will accept (at least the ticker symbol)
 interface StockAnalysisProps {
 	tickerSymbol: string;
 }
 
-// Define the structure for a technical factor (based on the example)
 interface TechnicalFactor {
 	factor: string;
 	value: string;
@@ -26,7 +31,6 @@ interface TechnicalFactor {
 	score: number;
 }
 
-// Define the structure for an entry strategy point
 interface EntryStrategyPoint {
 	zone: string;
 	price: string;
@@ -35,7 +39,6 @@ interface EntryStrategyPoint {
 	probability: string;
 }
 
-// Define the structure for an exit strategy point
 interface ExitStrategyPoint {
 	target: string;
 	price: string;
@@ -44,7 +47,6 @@ interface ExitStrategyPoint {
 	probability: string;
 }
 
-// Define the structure for a key level
 interface KeyLevel {
 	price: number;
 	type: 'Support' | 'Resistance' | 'Current';
@@ -52,7 +54,6 @@ interface KeyLevel {
 	description: string;
 }
 
-// Define the structure for a fundamental metric
 interface FundamentalMetric {
 	metric: string;
 	value: string;
@@ -60,28 +61,24 @@ interface FundamentalMetric {
 	comparison: string;
 }
 
-// Define the structure for VIX impact analysis
 interface VixImpact {
 	scenario: string;
 	effect: string;
-	nvdaImpact: string;
+	impact: string;
 	action: string;
 }
 
-// --- Price info broadcast from TickerPriceSearch ---
 interface PriceInfo {
 	price: number | null;
 	change: number | null;
 	percent: string | null;
 }
 
-// Define the structure for recommendation data (used in Pie Chart)
 interface RecommendationDataPoint {
 	name: 'Buy' | 'Hold' | 'Sell';
 	value: number;
 }
 
-// Define structure for overall summary data
 interface AnalysisSummary {
 	currentPrice: number;
 	priceChange: number;
@@ -101,7 +98,6 @@ interface AnalysisSummary {
 	entryTriggers: string[];
 }
 
-// Technical snapshot returned by backend
 interface TechnicalSnapshot {
 	trend: string;
 	rsi: string;
@@ -109,14 +105,12 @@ interface TechnicalSnapshot {
 	movingAverages: string;
 }
 
-// Define a comprehensive interface for the expected API response
 interface AnalysisDetail {
 	technicalSignals?: string;
 	portfolioAlignment?: string;
 	researchConsensus?: string;
 }
 
-// Wheel Strategy specific interfaces
 interface WheelPosition {
 	strike: number;
 	expiry: string;
@@ -127,9 +121,13 @@ interface WheelPosition {
 	status: string;
 	assignmentProb: string;
 	nextAction: string;
+	daysToExpiry: number;
+	term: 'LONG_DATED' | 'SHORT_DATED';
+	position: 'SHORT' | 'LONG';
 }
 
 interface WheelStrategy {
+	shareCount: number; // Real share count from portfolio
 	currentPhase: 'CASH_SECURED_PUT' | 'COVERED_CALL';
 	currentPositions: WheelPosition[];
 	wheelPerformance?: Array<{
@@ -160,48 +158,11 @@ interface StockAnalysisData {
 	confidence?: number;
 	additionalDataNeeded?: string;
 	wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
+	vix?: number; // VIX value for volatility display
 }
 
-// --- Remove or comment out Mock Data ---
-// const mockTechnicalFactors: TechnicalFactor[] = [ ... ];
-// const mockEntryStrategyPoints: EntryStrategyPoint[] = [ ... ];
-// const mockExitStrategyPoints: ExitStrategyPoint[] = [ ... ];
-// const mockKeyLevels: KeyLevel[] = [ ... ];
-// const mockFundamentalMetrics: FundamentalMetric[] = [ ... ];
-// const mockVixImpactData: VixImpact[] = [ ... ];
-// const mockRecommendationData: RecommendationDataPoint[] = [ ... ];
-// const mockAnalysisSummary: AnalysisSummary = { ... };
-// --- ---
 
-const COLORS = ['#00C49F', '#FFBB28', '#FF8042']; // Colors for Pie Chart
 
-// Helper to classify RSI value
-// const rsiLabel = (rsiStr: string) => {
-// 	const r = parseFloat(rsiStr);
-// 	if (isNaN(r)) return '';
-// 	if (r >= 70) return 'Overbought';
-// 	if (r <= 30) return 'Oversold';
-// 	return 'Neutral';
-// };
-
-// Helper to map trend description to color classesx
-const trendColor = (desc: string) => {
-	if (/overbought/i.test(desc) || /neutral/i.test(desc))
-		return 'bg-yellow-100 border-yellow-200 text-yellow-800';
-	if (/oversold/i.test(desc) || /downward/i.test(desc))
-		return 'bg-red-100 border-red-200 text-red-800';
-	return 'bg-green-100 border-green-200 text-green-800';
-};
-
-// Helper to color‑code confidence (0–10)
-const confidenceColor = (val: number | undefined) => {
-	if (val === undefined) return 'bg-gray-100 text-gray-800';
-	if (val < 6) return 'bg-red-100 text-red-800';
-	if (val < 8) return 'bg-yellow-100 text-yellow-800';
-	return 'bg-green-100 text-green-800';
-};
-
-// Helper to ensure we always have a 3‑slice array for the pie chart
 const toPieArray = (rec: unknown): RecommendationDataPoint[] => {
 	if (Array.isArray(rec)) return rec;
 	if (typeof rec === 'string') {
@@ -212,38 +173,9 @@ const toPieArray = (rec: unknown): RecommendationDataPoint[] => {
 			{name: 'Sell', value: upper === 'SELL' ? 100 : 0},
 		];
 	}
-	// fallback to mock if format unexpected
-	return mockRecommendationData;
+	return [];
 };
 
-// Helper to build concise summary labels
-const toSummary = (a: StockAnalysisData | null) => {
-	if (!a) {
-		return {
-			techTitle: 'Technical Trend',
-			techDesc: 'Loading…',
-			fundTitle: 'Opportunity',
-			fundDesc: 'Loading…',
-			mktTitle: 'Risk',
-			mktDesc: 'Loading…',
-		};
-	}
-
-	// Pull short text from the new integrated fields
-	const techDesc =
-		a.detail?.technicalSignals ?? a.summary?.technicalStance ?? '—';
-	const oppDesc = a.opportunity ?? a.detail?.portfolioAlignment ?? '—';
-	const riskDesc = a.risk ?? a.detail?.researchConsensus ?? '—';
-
-	return {
-		techTitle: 'Technical Signals',
-		techDesc,
-		fundTitle: 'Opportunity',
-		fundDesc: oppDesc,
-		mktTitle: 'Risk',
-		mktDesc: riskDesc,
-	};
-};
 
 export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const [analysisData, setAnalysisData] = useState<StockAnalysisData | null>(
@@ -258,16 +190,61 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		percent: null,
 	});
 	const [vix, setVix] = useState<number | null>(null);
-	// track AI‑analysis progress
 	const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-	// progress 0‑100 for determinate bar
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
+	
+	const { data: optionChainData, loading: optionChainLoading } = useOptionChain(tickerSymbol);
+	
+	// Fetch real-time quotes for wheel positions
+	// Convert date format from 'Jul-18-2025' to '2025-07-18' for API compatibility
+	const wheelPositions = useMemo(() => {
+		if (!analysisData?.wheelStrategy?.currentPositions) return [];
+		
+		return analysisData.wheelStrategy.currentPositions.map(pos => {
+			/**
+			 * Convert option expiry strings to Polygon's required YYYY-MM-DD format.
+			 *
+			 * Handles two cases:
+			 *   1. Already-formatted dates like "2025-07-18"  → returned unchanged.
+			 *   2. AI-style dates like "Jul-18-2025"          → mapped to "2025-07-18".
+			 *      (Any other pattern falls back to the original string and a console
+			 *       warning, so nothing crashes.)
+			 */
+			const parseExpiry = (dateStr: string): string => {
+				// Case 1 ─ already correct
+				if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
 
-	// Use mock data as fallback only for sections missing in analysisData,
-	// but if AI provides recommendation, do not fallback to mockRecommendationData
-	// Safer fallback: always provide arrays, never undefined
+				// Case 2 ─ "Jul-18-2025" (MMM-DD-YYYY)
+				const monthMap: Record<string, string> = {
+					Jan: '01', Feb: '02', Mar: '03', Apr: '04',
+					May: '05', Jun: '06', Jul: '07', Aug: '08',
+					Sep: '09', Oct: '10', Nov: '11', Dec: '12',
+				};
+
+				const match = dateStr.match(/^([A-Za-z]{3})-(\d{1,2})-(\d{4})$/);
+				if (match) {
+					const [, monStr, day, year] = match;
+					// Normalize to capitalize first letter for lookup
+					const monthKey = monStr.charAt(0).toUpperCase() + monStr.slice(1).toLowerCase();
+					const month = monthMap[monthKey];
+					if (month) return `${year}-${month}-${day.padStart(2, '0')}`;
+				}
+
+				console.warn('⚠️  parseExpiry: unrecognised format →', dateStr);
+				return dateStr;
+			};
+			
+			return {
+				...pos,
+				expiry: parseExpiry(pos.expiry)
+			};
+		});
+	}, [analysisData?.wheelStrategy?.currentPositions]);
+	
+	console.log('🔄 [WHEEL POSITIONS] Formatted for API:', wheelPositions);
+	const { quotes: wheelQuotes, loading: quotesLoading } = useWheelQuotes(wheelPositions);
+
 	const displayData = analysisData
 		? {
 				...analysisData,
@@ -279,18 +256,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				vixImpact: analysisData.vixImpact ?? [],
 				recommendation: toPieArray(analysisData.recommendation),
 		  }
-		: {
-				summary: mockAnalysisSummary,
-				technicalFactors: mockTechnicalFactors,
-				entryPoints: mockEntryStrategyPoints,
-				exitPoints: mockExitStrategyPoints,
-				keyLevels: mockKeyLevels,
-				fundamentals: mockFundamentalMetrics,
-				vixImpact: mockVixImpact,
-				recommendation: mockRecommendationData,
-		  };
+		: null;
 
-	// Add the fetch function
 	const fetchAnalysis = async (symbol: string) => {
 		if (!symbol) return;
 
@@ -298,7 +265,6 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		setError(null);
 
 		try {
-			// Replace with your actual API endpoint
 			const response = await axios.get(`/api/analysis/${symbol}`);
 			setAnalysisData(response.data);
 		} catch (err) {
@@ -313,7 +279,6 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		}
 	};
 
-	// Add useEffect to trigger the fetch
 	useEffect(() => {
 		fetchAnalysis(tickerSymbol);
 	}, [tickerSymbol]);
@@ -357,32 +322,38 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			}
 			
 			// 🎯 CRITICAL: Log the wheel strategy data when it arrives
+			// Note: The data comes as 'wheelAnalysis' from the edge function
+			const wheelData = e.detail.wheelAnalysis || e.detail.wheelStrategy;
 			console.log('🚀🚀🚀 [WHEEL STRATEGY DATA RECEIVED]', {
 				timestamp: new Date().toISOString(),
-				hasWheelStrategy: !!e.detail.wheelStrategy,
-				wheelPhase: e.detail.wheelStrategy?.currentPhase,
-				positions: e.detail.wheelStrategy?.currentPositions,
-				fullWheelData: e.detail.wheelStrategy
+				hasWheelStrategy: !!wheelData,
+				wheelPhase: wheelData?.currentPhase,
+				positions: wheelData?.currentPositions,
+				fullWheelData: wheelData
 			});
 
 			// 🔍 VERIFY: Does AI see your actual portfolio positions?
-			if (e.detail.wheelStrategy?.currentPositions && e.detail.wheelStrategy.currentPositions.length > 0) {
+			if (wheelData?.currentPositions && wheelData.currentPositions.length > 0) {
 				console.log('✅ [AI SEES YOUR POSITIONS]', {
-					positionCount: e.detail.wheelStrategy.currentPositions.length,
-					firstPosition: e.detail.wheelStrategy.currentPositions[0],
-					allStrikes: e.detail.wheelStrategy.currentPositions.map(p => p.strike),
-					allReturns: e.detail.wheelStrategy.currentPositions.map(p => p.cycleReturn),
-					wheelPhase: e.detail.wheelStrategy.currentPhase
+					positionCount: wheelData.currentPositions.length,
+					firstPosition: wheelData.currentPositions[0],
+					allStrikes: wheelData.currentPositions.map(p => p.strike),
+					allReturns: wheelData.currentPositions.map(p => p.cycleReturn),
+					wheelPhase: wheelData.currentPhase
 				});
 			} else {
 				console.log('❌ [AI DEFAULTING TO GENERIC] No specific positions found in AI response:', {
-					hasWheelStrategy: !!e.detail.wheelStrategy,
-					wheelStrategyKeys: e.detail.wheelStrategy ? Object.keys(e.detail.wheelStrategy) : 'none',
-					recommendationInstead: e.detail.recommendation || 'none'
+					wheelAnalysis: e.detail.wheelAnalysis,
+					wheelStrategy: e.detail.wheelStrategy
 				});
 			}
 			
-			setAnalysisData(e.detail); // fills tabs
+			// Normalize the data structure - handle both wheelAnalysis and wheelStrategy
+			const normalizedData = {
+				...e.detail,
+				wheelStrategy: e.detail.wheelAnalysis || e.detail.wheelStrategy
+			};
+			setAnalysisData(normalizedData); // fills tabs
 		};
 		window.addEventListener('analysis-ready', handler as EventListener);
 		return () =>
@@ -491,8 +462,14 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 					<p className='text-red-500'>{error}</p>
 				</div>
 			)}
-			<Card className='w-full h-full flex flex-col'>
-				<CardHeader className='bg-gray-100 border-b flex flex-col justify-center'>
+			{!isLoading && !error && !displayData && (
+				<div className='flex items-center justify-center h-full'>
+					<p className='text-gray-500'>No analysis data available</p>
+				</div>
+			)}
+			{!isLoading && !error && displayData && (
+			<Card className='w-full h-full flex flex-col overflow-hidden !pt-0'>
+				<CardHeader className='bg-gray-100 border-b flex flex-col justify-center pt-6'>
 					<CardTitle className='text-xl'>
 						{tickerSymbol || 'N/A'} Strategic Investment Analysis
 					</CardTitle>
@@ -526,39 +503,179 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className='flex-grow p-4 overflow-y-auto'>
-					{/* Summary Boxes */}
-					<div className='grid grid-cols-1 md:grid-cols-3 gap-4 mb-6'>
-						<div
-							className={`p-3 rounded-lg border ${trendColor(
-								toSummary(analysisData).techDesc
-							)}`
-								.replace(' text-', ' ')
-								.replace('bg-', 'bg-')
-								.replace(' border-', ' border-')}>
-							<h3 className='font-bold text-sm'>
-								{toSummary(analysisData).techTitle}
-							</h3>
-							<p className='text-xs'>
-								{toSummary(analysisData).techDesc}
-							</p>
+					{/* Status Cards Row - Moved above tabs */}
+					{analysisData?.wheelStrategy && (
+						<div className='grid grid-cols-1 md:grid-cols-3 gap-4 mb-6'>
+							{/* Position Status Card - Updated design */}
+							<div className='bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200'>
+								<div className='flex items-start justify-between'>
+									<div className='flex-1'>
+										<div className='flex items-center gap-2 mb-2'>
+											<svg className='w-5 h-5 text-blue-600' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+												<path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} 
+													d='M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' 
+												/>
+											</svg>
+											<p className='text-sm font-medium text-gray-600'>Position Status</p>
+										</div>
+										<p className='text-lg font-bold text-gray-900'>
+											{(analysisData.wheelStrategy?.shareCount || 0).toLocaleString()} shares
+											{(() => {
+												const positions = analysisData.wheelStrategy?.currentPositions || [];
+												
+												// Debug logging
+												console.log('🔍 [POSITION STATUS DEBUG] Raw positions:', positions);
+												
+												// Add term field if missing (fallback for undeployed edge function)
+												const positionsWithTerm = positions.map(pos => {
+													// Calculate days to expiry if missing
+													let daysToExpiry = pos.daysToExpiry;
+													if (!daysToExpiry && pos.expiry) {
+														const today = new Date();
+														const expiryDate = new Date(pos.expiry);
+														daysToExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+													}
+													
+													return {
+														...pos,
+														daysToExpiry,
+														term: pos.term || (daysToExpiry > 365 ? 'LONG_DATED' : 'SHORT_DATED')
+													};
+												});
+												
+												// Categorize positions by direction (SHORT/LONG) and term
+												const soldPositions = positionsWithTerm.filter(pos => pos.contracts < 0);
+												const boughtPositions = positionsWithTerm.filter(pos => pos.contracts > 0);
+												
+												console.log('🔍 [POSITION STATUS DEBUG] Sold positions:', soldPositions.length, 'Bought positions:', boughtPositions.length);
+												
+												// Count sold positions by term
+												const soldShortDated = soldPositions.filter(pos => pos.term === 'SHORT_DATED')
+													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
+												const soldLongDated = soldPositions.filter(pos => pos.term === 'LONG_DATED')
+													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
+												
+												// Count bought positions by term (if any)
+												const boughtShortDated = boughtPositions.filter(pos => pos.term === 'SHORT_DATED')
+													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
+												const boughtLongDated = boughtPositions.filter(pos => pos.term === 'LONG_DATED')
+													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
+												
+												const totalSold = soldShortDated + soldLongDated;
+												const totalBought = boughtShortDated + boughtLongDated;
+												
+												console.log('🔍 [POSITION STATUS DEBUG] Counts:', {
+													soldShortDated, soldLongDated, boughtShortDated, boughtLongDated,
+													totalSold, totalBought
+												});
+												
+												// Debug: log each position's term
+												console.log('🔍 [POSITION STATUS DEBUG] Position terms:', 
+													positionsWithTerm.map(p => ({
+														strike: p.strike,
+														daysToExpiry: p.daysToExpiry,
+														term: p.term,
+														contracts: p.contracts
+													}))
+												);
+												
+												const parts = [];
+												
+												// Display sold calls with term breakdown
+												if (totalSold > 0) {
+													let soldText = ` + ${totalSold} sold call${totalSold > 1 ? 's' : ''}`;
+													if (soldShortDated > 0 && soldLongDated > 0) {
+														soldText += ` (${soldShortDated} short-dated, ${soldLongDated} long-dated)`;
+													} else if (soldShortDated > 0) {
+														soldText += ' (short-dated)';
+													} else if (soldLongDated > 0) {
+														soldText += ' (long-dated)';
+													}
+													parts.push(soldText);
+												}
+												
+												// Display bought calls with term breakdown
+												if (totalBought > 0) {
+													let boughtText = ` + ${totalBought} bought call${totalBought > 1 ? 's' : ''}`;
+													if (boughtShortDated > 0 && boughtLongDated > 0) {
+														boughtText += ` (${boughtShortDated} short-dated, ${boughtLongDated} long-dated)`;
+													} else if (boughtShortDated > 0) {
+														boughtText += ' (short-dated)';
+													} else if (boughtLongDated > 0) {
+														boughtText += ' (long-dated)';
+													}
+													parts.push(boughtText);
+												}
+												
+												return <>{parts.join('')}</>;
+											})()}
+										</p>
+										<p className='text-sm text-blue-600 mt-1'>
+											Net positive carry
+										</p>
+										<div className='mt-3 pt-3 border-t border-blue-200'>
+											<p className='text-xs text-gray-600'>Total Premium Collected</p>
+											<p className='text-xl font-bold text-gray-900'>
+												${analysisData.wheelStrategy.currentPositions?.reduce((total, pos) => {
+													// Use premiumCollected if premium is not available
+													const premiumValue = pos.premium || pos.premiumCollected || 0;
+													return total + (premiumValue * 100 * Math.abs(pos.contracts));
+												}, 0).toFixed(2) || '0.00'}
+											</p>
+										</div>
+									</div>
+								</div>
+							</div>
+
+							{/* IV Environment Card */}
+							<div className='bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg border border-green-200'>
+								<div className='flex items-start justify-between'>
+									<div>
+										<p className='text-sm font-medium text-gray-600'>IV Environment</p>
+										<p className='text-2xl font-bold text-green-700 mt-1'>
+											{(analysisData.vix || 0) > 20 ? 'High Vol' : (analysisData.vix || 0) > 15 ? 'Moderate' : 'Low Vol'}
+										</p>
+										<p className='text-xs text-gray-500 mt-1'>VIX: {analysisData.vix?.toFixed(2)}</p>
+									</div>
+									<span className='inline-flex items-center justify-center w-10 h-10 rounded-full bg-green-100 text-green-600'>
+										<svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+											<path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} 
+												d='M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z' 
+											/>
+										</svg>
+									</span>
+								</div>
+							</div>
+
+							{/* Assignment Risk Card */}
+							<div className='bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-200'>
+								<div className='flex items-start justify-between'>
+									<div>
+										<p className='text-sm font-medium text-gray-600'>Assignment Risk</p>
+										<p className='text-2xl font-bold text-purple-700 mt-1'>
+											{analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb || '0%'}
+										</p>
+										<p className='text-xs text-gray-500 mt-1'>
+											{parseFloat(analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb || '0') > 50 
+												? 'Monitor closely' 
+												: 'Within normal range'}
+										</p>
+									</div>
+									<span className={`inline-flex items-center justify-center w-10 h-10 rounded-full ${
+										parseFloat(analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb || '0') > 50
+											? 'bg-yellow-100 text-yellow-600'
+											: 'bg-purple-100 text-purple-600'
+									}`}>
+										<svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+											<path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} 
+												d='M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' 
+											/>
+										</svg>
+									</span>
+								</div>
+							</div>
 						</div>
-						<div className='bg-blue-100 p-3 rounded-lg border border-blue-200'>
-							<h3 className='font-bold text-sm text-blue-800'>
-								{toSummary(analysisData).fundTitle}
-							</h3>
-							<p className='text-xs text-blue-700'>
-								{toSummary(analysisData).fundDesc}
-							</p>
-						</div>
-						<div className='bg-yellow-100 p-3 rounded-lg border border-yellow-200'>
-							<h3 className='font-bold text-sm text-yellow-800'>
-								{toSummary(analysisData).mktTitle}
-							</h3>
-							<p className='text-xs text-yellow-700'>
-								{toSummary(analysisData).mktDesc}
-							</p>
-						</div>
-					</div>
+					)}
 
 					{/* Inline loader using shadcn style */}
 					{/* Determinate Progress bar while AI builds */}
@@ -603,7 +720,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							</TabsTrigger>
 						</TabsList>
 
-						{/* Performance Analysis Tab Content */}
+						{/* Performance Analysis Tab Content - Testing Hook */}
 						<TabsContent
 							value='performance'
 							className='space-y-4'>
@@ -616,121 +733,313 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 								positions: analysisData?.wheelStrategy?.currentPositions
 							})}
 							
-							{/* Hero Performance Card */}
-							<Card>
-								<CardHeader className="bg-gradient-to-r from-green-900 to-blue-900 text-white">
-									<CardTitle className="text-xl">
-										Actual Returns vs Target - {analysisData?.wheelStrategy?.currentPositions?.[0]?.status || 'ANALYZING'}
-									</CardTitle>
-									<CardDescription className="text-gray-200">
-										Your wheel strategy performance analysis
-									</CardDescription>
-								</CardHeader>
-								<CardContent className="pt-6">
-									{analysisData?.wheelStrategy ? (
-										<>
-											{/* Performance Overview */}
-											<div className="mb-6">
-												<div className="flex items-center justify-between mb-2">
-													<span className="text-sm font-medium">Target Return</span>
-													<span className="text-sm text-gray-600">4-7% per cycle</span>
-												</div>
-												<div className="flex items-center justify-between mb-4">
-													<span className="text-sm font-medium">Actual Return</span>
-													<span className="text-lg font-bold text-green-600">
-														{analysisData.wheelStrategy.currentPositions?.[0]?.cycleReturn || '0%'}
-													</span>
-												</div>
-												{/* Performance Progress Bar */}
-												<div className="relative h-8 bg-gray-200 rounded-full overflow-hidden">
-													<div 
-														className="absolute h-full bg-gradient-to-r from-green-500 to-green-600 flex items-center justify-end pr-2"
-														style={{width: `${Math.min(parseFloat(analysisData.wheelStrategy.currentPositions?.[0]?.cycleReturn || '0') / 7 * 100, 100)}%`}}>
-														<span className="text-xs text-white font-semibold">
-															{analysisData.wheelStrategy.currentPositions?.[0]?.cycleReturn || '0%'}
+							{analysisData?.wheelStrategy ? (
+								<>
+
+									{/* Current Positions - Single Column Layout */}
+									<Card className="w-full">
+										<CardHeader className="pb-3">
+											<CardTitle className="text-lg">Current {analysisData.wheelStrategy?.currentPhase === 'CASH_SECURED_PUT' ? 'Put' : 'Call'} Positions</CardTitle>
+										</CardHeader>
+										<CardContent>
+											{analysisData.wheelStrategy?.currentPositions?.map((position, idx) => {
+												// Calculate days to expiry from the expiry date
+												const today = new Date();
+												const expiryDate = new Date(position.expiry);
+												const daysToExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
+												
+												// Calculate term based on days to expiry
+												const term = position.term || (daysToExpiry > 365 ? 'LONG_DATED' : 'SHORT_DATED');
+												
+												// Determine position direction from original contract value
+												const positionDirection = position.contracts < 0 ? 'SHORT' : 'LONG';
+												
+												// Color based on assignment risk (current price vs strike)
+												const currentPrice = analysisData.summary?.currentPrice || 0;
+												const moneyness = ((currentPrice - position.strike) / position.strike) * 100;
+												
+												// For calls: ITM (in the money) = high risk, ATM (at the money) = medium risk, OTM (out of the money) = low risk
+												const bgColor = moneyness >= 0 ? 'bg-red-50 border-red-200' :      // ITM - high assignment risk
+												               moneyness >= -3 ? 'bg-yellow-50 border-yellow-200' : // Near the money - moderate risk
+												               'bg-green-50 border-green-200';                      // OTM - low assignment risk
+												
+												return (
+													<div key={idx} className={`p-4 rounded-lg border ${bgColor} mb-3`}>
+														<div className="space-y-2">
+															<div className="flex justify-between items-center mb-2">
+																<span className="text-lg font-bold">
+																	${position.strike} Call {position.expiry} ({Math.abs(position.contracts)} contract{Math.abs(position.contracts) > 1 ? 's' : ''})
+																</span>
+																<div className="flex items-center gap-2">
+																	<span className={`text-xs px-2 py-1 rounded-full font-medium ${
+																		moneyness >= 0 ? 'bg-red-100 text-red-700' :
+																		moneyness >= -3 ? 'bg-yellow-100 text-yellow-700' :
+																		'bg-green-100 text-green-700'
+																	}`}>
+																		{moneyness >= 0 ? 'HIGH RISK' :
+																		 moneyness >= -3 ? 'MODERATE RISK' :
+																		 'LOW RISK'}
+																	</span>
+																	<span className="text-xs text-gray-500">
+																		{positionDirection === 'SHORT' ? 'SOLD' : 'BOUGHT'}
+																	</span>
+																</div>
+															</div>
+															<div className="text-sm text-gray-600 mb-2">
+																{daysToExpiry} days to expiry • {term === 'LONG_DATED' ? 'Long-dated' : 'Short-dated'}
+															</div>
+															<div className="grid grid-cols-2 gap-4 text-sm">
+																<div>
+																	<span className="text-gray-600">Premium: </span>
+																	<span className="font-semibold">${position.premium || position.premiumCollected}</span>
+																</div>
+																<div className="text-right">
+																	<span className="text-gray-600">Current: </span>
+																	<span className="font-semibold">${position.currentValue || 'N/A'}</span>
+																</div>
+																<div>
+																	<span className="text-gray-600">P&L: </span>
+																	<span className={`font-semibold ${(position.profitLoss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+																		${position.profitLoss || 0}
+																	</span>
+																</div>
+															</div>
+														</div>
+													</div>
+												);
+											})}
+										</CardContent>
+									</Card>
+
+									{/* Wheel Strategy Metrics Card */}
+									<Card className="w-full mt-4">
+										<CardHeader className="pb-3">
+											<CardTitle className="text-lg">Wheel Strategy Metrics</CardTitle>
+											<CardDescription>Performance and risk metrics</CardDescription>
+										</CardHeader>
+										<CardContent>
+											<div className="space-y-4">
+												{(() => {
+													// Use real-time quotes if available, otherwise show loading/placeholder
+													const positions = analysisData.wheelStrategy?.currentPositions || [];
+													
+													// Calculate metrics using real quotes - filter for successful quotes only
+													const goodQuotes = wheelQuotes.filter(q => q.success && q.quote);
+													const metrics = goodQuotes.length > 0 
+														? calculateAggregateMetrics(positions, wheelQuotes)
+														: null;
+													
+													// For new position suggestion, use option chain data
+													const shareCount = analysisData.wheelStrategy?.shareCount || 100;
+													const currentPrice = displayData?.summary?.currentPrice || priceInfo.price || 0;
+													
+													// Calculate potential return for next cycle (from option chain)
+													const nextCycleReturn = optionChainData?.success && optionChainData.chain && currentPrice > 0
+														? grossYield(
+																cycleCredit(optionChainData.chain.mid),
+																shareCount,
+																currentPrice,
+																optionChainData.chain.dte
+															)
+														: null;
+													
+													// Calculate assignment probability for next cycle
+													const nextCycleAssignmentProb = currentPrice && optionChainData?.chain
+														? estimateAssignmentProb(
+															currentPrice,
+															optionChainData.chain.strike,
+															optionChainData.chain.dte
+														)
+														: null;
+													
+													// Use aggregate metrics if available
+													const totalPremiumCollected = metrics?.totalPremiumCollected || 0;
+													const costToClosePosition = metrics?.totalCostToClose || null;
+													const unrealizedPL = metrics?.unrealizedPL || null;
+													const maxProfitPotential = totalPremiumCollected;
+													
+													return (
+														<>
+															{/* Total Premium Collected */}
+															<div className="flex justify-between items-baseline border-b pb-2">
+																<span className="text-sm text-gray-600">Total Premium Collected</span>
+																<div className="text-right">
+																	<span className="text-lg font-bold">${totalPremiumCollected.toFixed(2)}</span>
+																	<span className="text-xs text-green-600 ml-1">+8.02%</span>
+																</div>
+															</div>
+															
+															{/* Unrealized P&L */}
+															<div className="flex justify-between items-baseline border-b pb-2">
+																<span className="text-sm text-gray-600">Unrealized P&L</span>
+																<div className="text-right">
+																	{unrealizedPL !== null ? (
+																		<>
+																			<span className="text-lg font-bold">{unrealizedPL >= 0 ? '+' : ''}${Math.abs(unrealizedPL).toFixed(2)}</span>
+																			{totalPremiumCollected > 0 && (
+																				<span className={`text-xs ml-1 ${unrealizedPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+																					{unrealizedPL >= 0 ? '+' : ''}{((unrealizedPL / totalPremiumCollected) * 100).toFixed(1)}%
+																				</span>
+																			)}
+																		</>
+																	) : (
+																		<span className="text-xs text-gray-400">Loading...</span>
+																	)}
+																</div>
+															</div>
+															
+															{/* Cost to Close (was Net Premium Remaining) */}
+															<div className="flex justify-between items-baseline border-b pb-2">
+																<span className="text-sm text-gray-600">Cost to Close</span>
+																<div className="text-right">
+																	{costToClosePosition !== null ? (
+																		<>
+																			<span className="text-lg font-bold">${costToClosePosition.toFixed(2)}</span>
+																			{totalPremiumCollected > 0 && (
+																				<span className="text-xs text-gray-600 ml-1">
+																					{((costToClosePosition / totalPremiumCollected) * 100).toFixed(0)}% of collected
+																				</span>
+																			)}
+																		</>
+																	) : (
+																		<span className="text-xs text-gray-400">Loading...</span>
+																	)}
+																</div>
+															</div>
+															
+															{/* Position-Weighted Average Return */}
+															{positions.length > 0 && metrics && (
+																<div className="flex justify-between items-baseline border-b pb-2">
+																	<span className="text-sm text-gray-600">Average Position Delta</span>
+																	<div className="text-right">
+																		{metrics.averageDelta !== null ? (
+																			<span className="text-lg font-bold">{(metrics.averageDelta * 100).toFixed(1)}%</span>
+																		) : (
+																			<span className="text-xs text-gray-400">No delta data</span>
+																		)}
+																	</div>
+																</div>
+															)}
+															
+															{/* Max Profit Potential */}
+															<div className="flex justify-between items-baseline">
+																<span className="text-sm text-gray-600">Max Profit Potential</span>
+																<div className="text-right">
+																	<span className="text-lg font-bold">${maxProfitPotential.toFixed(2)}</span>
+																	<span className="text-xs text-gray-500 ml-1">Target</span>
+																</div>
+															</div>
+														</>
+													);
+												})()}
+											</div>
+										</CardContent>
+									</Card>
+
+									{/* Next Cycle Opportunity Card */}
+									{optionChainData?.success && optionChainData.chain && (
+										<Card className="w-full mt-4">
+											<CardHeader className="pb-3">
+												<CardTitle className="text-lg">Next 30-45% Wheel Opportunity</CardTitle>
+												<CardDescription>Optimal position for next cycle based on current market</CardDescription>
+											</CardHeader>
+											<CardContent>
+												<div className="space-y-3">
+													<div className="flex justify-between items-baseline">
+														<span className="text-sm text-gray-600">Contract</span>
+														<span className="font-mono text-sm">
+															{tickerSymbol} ${optionChainData.chain.strike} CALL {optionChainData.chain.expiry}
+														</span>
+													</div>
+													<div className="flex justify-between items-baseline">
+														<span className="text-sm text-gray-600">Days to Expiry</span>
+														<span className="font-bold">{optionChainData.chain.dte} days</span>
+													</div>
+													<div className="flex justify-between items-baseline">
+														<span className="text-sm text-gray-600">Delta</span>
+														<span className="font-bold">{(optionChainData.chain.delta * 100).toFixed(1)}%</span>
+													</div>
+													<div className="flex justify-between items-baseline">
+														<span className="text-sm text-gray-600">Premium per Contract</span>
+														<span className="font-bold">${(optionChainData.chain.mid * 100).toFixed(2)}</span>
+													</div>
+													<div className="flex justify-between items-baseline border-t pt-2">
+														<span className="text-sm font-medium text-gray-700">Annualized Return</span>
+														<span className="text-lg font-bold text-green-600">
+															{nextCycleReturn ? `${nextCycleReturn.toFixed(1)}%` : 'N/A'}
+														</span>
+													</div>
+													<div className="flex justify-between items-baseline">
+														<span className="text-sm font-medium text-gray-700">12-Month Compounded</span>
+														<span className="text-lg font-bold text-green-600">
+															{nextCycleReturn ? `${compounding(nextCycleReturn).toFixed(1)}%` : 'N/A'}
+														</span>
+													</div>
+													<div className="flex justify-between items-baseline">
+														<span className="text-sm text-gray-600">Assignment Probability</span>
+														<span className="font-medium">
+															{nextCycleAssignmentProb ? `${(nextCycleAssignmentProb * 100).toFixed(0)}%` : 'N/A'}
 														</span>
 													</div>
 												</div>
-											</div>
-
-											{/* Current Position Status */}
-											<div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-												{/* Position Card */}
-												<Card className="border-green-200 bg-green-50">
-													<CardHeader className="pb-3">
-														<CardTitle className="text-lg">Current {analysisData.wheelStrategy.currentPhase === 'CASH_SECURED_PUT' ? 'Put' : 'Call'} Position</CardTitle>
-													</CardHeader>
-													<CardContent>
-														{analysisData.wheelStrategy.currentPositions?.map((position, idx) => (
-															<div key={idx} className="space-y-2">
-																<div className="flex justify-between">
-																	<span className="text-sm text-gray-600">Strike Price</span>
-																	<span className="font-semibold">${position.strike}</span>
-																</div>
-																<div className="flex justify-between">
-																	<span className="text-sm text-gray-600">Expiry</span>
-																	<span className="font-semibold">{position.expiry}</span>
-																</div>
-																<div className="flex justify-between">
-																	<span className="text-sm text-gray-600">Premium Collected</span>
-																	<span className="font-semibold">${position.premium}</span>
-																</div>
-																<div className="flex justify-between">
-																	<span className="text-sm text-gray-600">Contracts</span>
-																	<span className="font-semibold">{position.contracts}</span>
-																</div>
-																<div className="flex justify-between">
-																	<span className="text-sm text-gray-600">Assignment Probability</span>
-																	<span className="font-semibold">{position.assignmentProb}</span>
-																</div>
-															</div>
-														))}
-													</CardContent>
-												</Card>
-
-												{/* Metrics Card */}
-												<Card>
-													<CardHeader className="pb-3">
-														<CardTitle className="text-lg">Wheel Strategy Metrics</CardTitle>
-													</CardHeader>
-													<CardContent>
-														<div className="space-y-3">
-															<div className="flex justify-between items-center">
-																<span className="text-sm text-gray-600">Current Phase</span>
-																<span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold">
-																	{analysisData.wheelStrategy.currentPhase === 'CASH_SECURED_PUT' ? 'Cash-Secured Put' : 'Covered Call'}
-																</span>
-															</div>
-															<div className="flex justify-between">
-																<span className="text-sm text-gray-600">Position Status</span>
-																<span className={`font-semibold ${
-																	analysisData.wheelStrategy.currentPositions?.[0]?.status === 'GOOD' ? 'text-green-600' : 'text-yellow-600'
-																}`}>
-																	{analysisData.wheelStrategy.currentPositions?.[0]?.status || 'PENDING'}
-																</span>
-															</div>
-															<div className="flex justify-between">
-																<span className="text-sm text-gray-600">Next Action</span>
-																<span className="text-sm font-medium">
-																	{analysisData.wheelStrategy.currentPositions?.[0]?.nextAction || 'Awaiting analysis'}
-																</span>
-															</div>
-														</div>
-													</CardContent>
-												</Card>
-											</div>
-										</>
-									) : (
-										<div className="text-center py-8">
-											<p className="text-gray-500">Wheel strategy analysis will appear here once analysis completes.</p>
-										</div>
+											</CardContent>
+										</Card>
 									)}
+								</>
+							) : (
+								<div className="text-center py-8">
+									<p className="text-gray-500">Wheel strategy analysis will appear here once analysis completes.</p>
+								</div>
+							)}
+						</TabsContent>
+
+						{/* Wheel Execution Tab Content */}
+						<TabsContent value='wheel-execution' className='space-y-4'>
+							<Card>
+								<CardHeader>
+									<CardTitle>Wheel Execution Strategy</CardTitle>
+									<CardDescription>
+										Detailed execution plan for wheel strategy positions
+									</CardDescription>
+								</CardHeader>
+								<CardContent>
+									<p className="text-gray-500">Wheel execution analysis will appear here once analysis completes.</p>
 								</CardContent>
 							</Card>
 						</TabsContent>
 
-						{/* Technical Tab Content */}
-						<TabsContent value='technical' className='space-y-4'>
+						{/* Assignment Success Tab Content */}
+						<TabsContent value='assignment-success' className='space-y-4'>
+							<Card>
+								<CardHeader>
+									<CardTitle>Assignment Success Analysis</CardTitle>
+									<CardDescription>
+										Probability and timing of assignment outcomes
+									</CardDescription>
+								</CardHeader>
+								<CardContent>
+									<p className="text-gray-500">Assignment success metrics will appear here once analysis completes.</p>
+								</CardContent>
+							</Card>
+						</TabsContent>
+
+						{/* Continuation Plan Tab Content */}
+						<TabsContent value='continuation-plan' className='space-y-4'>
+							<Card>
+								<CardHeader>
+									<CardTitle>Continuation Strategy</CardTitle>
+									<CardDescription>
+										Next steps and position management recommendations
+									</CardDescription>
+								</CardHeader>
+								<CardContent>
+									<p className="text-gray-500">Continuation plan will appear here once analysis completes.</p>
+								</CardContent>
+							</Card>
+						</TabsContent>
+
+						{/* Market Context Tab Content */}
+						<TabsContent value='market-context' className='space-y-4'>
 							<Card>
 								<CardHeader>
 									<CardTitle>
@@ -815,52 +1124,6 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 								</CardContent>
 							</Card>
 							{/* Add S/R Levels Card (using displayData.keyLevels) and Candlestick Card here later */}
-						</TabsContent>
-
-						{/* Fundamental Tab Content */}
-						<TabsContent value='fundamental' className='space-y-4'>
-							<Card>
-								<CardHeader>
-									<CardTitle>Fundamental Metrics</CardTitle>
-								</CardHeader>
-								<CardContent>
-									<table className='w-full text-sm'>
-										<thead>
-											<tr className='border-b'>
-												<th className='text-left py-2'>
-													Metric
-												</th>
-												<th className='text-left py-2'>
-													Value
-												</th>
-												<th className='text-left py-2'>
-													Assessment
-												</th>
-												<th className='text-left py-2'>
-													Comparison
-												</th>
-											</tr>
-										</thead>
-										<tbody>
-											{displayData.fundamentals.map(
-												(fm, idx) => (
-													<tr
-														key={idx}
-														className='border-b last:border-0'>
-														<td className='py-2'>
-															{fm.metric}
-														</td>
-														<td>{fm.value}</td>
-														<td>{fm.assessment}</td>
-														<td>{fm.comparison}</td>
-													</tr>
-												)
-											)}
-										</tbody>
-									</table>
-								</CardContent>
-							</Card>
-							{/* Add Segment Perf & Analyst Cards here later */}
 						</TabsContent>
 
 						{/* Strategy Tab Content */}
@@ -1018,94 +1281,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				{/* Optional CardFooter if needed */}
 				{/* <CardFooter>Footer content</CardFooter> */}
 			</Card>
+			)}
 		</div>
 	);
 }
 
-// --- Mock Data (Keep temporarily for fallbacks) ---
-const mockTechnicalFactors: TechnicalFactor[] = [
-	{
-		factor: 'RSI (14)',
-		value: '65.2',
-		interpretation: 'Moderately Overbought',
-		impact: 'Neutral',
-		score: 6,
-	},
-];
-
-const mockEntryStrategyPoints: EntryStrategyPoint[] = [
-	{
-		zone: 'Support Level',
-		price: '$490.00',
-		timing: 'On pullback',
-		rationale: 'Strong historical support',
-		probability: '70%',
-	},
-];
-
-const mockExitStrategyPoints: ExitStrategyPoint[] = [
-	{
-		target: 'Resistance Level',
-		price: '$520.00',
-		gain: '4.0%',
-		timeframe: '2-4 weeks',
-		probability: '65%',
-	},
-];
-
-const mockKeyLevels: KeyLevel[] = [
-	{
-		price: 500.25,
-		type: 'Current',
-		significance: 'Current Price',
-		description: 'Last traded price',
-	},
-];
-
-const mockFundamentalMetrics: FundamentalMetric[] = [
-	{
-		metric: 'P/E Ratio',
-		value: '28.5',
-		assessment: 'Fair Value',
-		comparison: 'Below sector average',
-	},
-];
-
-const mockVixImpact: VixImpact[] = [
-	{
-		scenario: 'VIX Below 20',
-		effect: 'Low Volatility',
-		nvdaImpact: 'Positive',
-		action: 'Consider adding',
-	},
-];
-
-const mockRecommendationData: RecommendationDataPoint[] = [
-	{name: 'Buy', value: 60},
-	{name: 'Hold', value: 30},
-	{name: 'Sell', value: 10},
-];
-
-const mockAnalysisSummary: AnalysisSummary = {
-	currentPrice: 500.25,
-	priceChange: 12.34,
-	priceChangePercent: '+2.52%',
-	vix: 18.5,
-	overallAssessment: 'Bullish',
-	technicalStance: 'Strong Uptrend',
-	technicalDetail: 'Price above 50/200 MA, RSI healthy.',
-	fundamentalAssessment: 'Excellent Growth',
-	fundamentalDetail: 'Revenue and EPS beating estimates.',
-	marketContext: 'Favorable',
-	marketContextDetail: 'Sector rotation into tech.',
-	investmentThesis: [
-		'AI leadership',
-		'Strong earnings',
-		'Market share gains',
-	],
-	bullCase: ['Continued AI demand', 'Margin expansion'],
-	bearCase: ['Macro headwinds', 'Competition risk'],
-	positionManagement: ['Use trailing stops', 'Scale in on dips'],
-	entryTriggers: ['Breakout above $510', 'Pullback to $490 support'],
-};
-// --- ---

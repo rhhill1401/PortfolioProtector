@@ -207,6 +207,23 @@ Return ONLY the JSON structure specified. No explanations.`,
     try {
       const portfolio = JSON.parse(txt);
       
+      // Post-process option positions to calculate daysToExpiry and term length
+      if (portfolio.metadata?.optionPositions) {
+        const today = new Date();
+        
+        portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.map((opt: any) => {
+          const d = new Date(opt.expiry);
+          const days = isNaN(+d) ? 0 : Math.max(0, Math.ceil((d.getTime() - today.getTime()) / 86_400_000));
+          
+          return {
+            ...opt,
+            daysToExpiry: days,
+            term: days > 365 ? 'LONG_DATED' : 'SHORT_DATED',
+            position: opt.contracts < 0 ? 'SHORT' : 'LONG' // Keep position for bought/sold distinction
+          };
+        });
+      }
+      
       console.log(`✅ [PORTFOLIO VISION] Successfully parsed portfolio data:`, {
         portfolioDetected: portfolio.portfolioDetected,
         positionCount: portfolio.positions?.length || 0,
@@ -234,7 +251,7 @@ Return ONLY the JSON structure specified. No explanations.`,
       if (portfolio.metadata?.optionPositions && portfolio.metadata.optionPositions.length > 0) {
         console.log(`📊 [OPTION POSITIONS EXTRACTED]:`, portfolio.metadata.optionPositions);
         portfolio.metadata.optionPositions.forEach((pos: any, index: number) => {
-          console.log(`   Option ${index + 1}: ${pos.symbol} $${pos.strike}${pos.optionType} ${pos.expiry} - ${pos.contracts} contracts (${pos.position}) P&L: $${pos.profitLoss}`);
+          console.log(`   Option ${index + 1}: ${pos.symbol} $${pos.strike}${pos.optionType} ${pos.expiry} - ${pos.contracts} contracts (${pos.position}) DTE: ${pos.daysToExpiry || 'N/A'} P&L: $${pos.profitLoss}`);
         });
       }
 

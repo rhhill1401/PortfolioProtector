@@ -235,6 +235,7 @@ TECHNICAL DATA:
 Return this JSON structure:
 {
   "wheelStrategy": {
+    "shareCount": ${currentShares},
     "currentPhase": "${wheelPhase}",
     "currentPositions": [${currentOptionPositions.length > 0 ? 
       currentOptionPositions.map((opt: unknown) => {
@@ -243,7 +244,7 @@ Return this JSON structure:
         "strike": ${position.strike || 0},
         "expiry": "${position.expiry || 'Unknown'}",
         "type": "${position.optionType || 'CALL'}",
-        "contracts": ${Math.abs(Number(position.contracts)) || 1},
+        "contracts": ${Number(position.contracts) || 1},
         "premium": ${position.premiumCollected || 0},
         "currentValue": ${position.currentValue || 0},
         "profitLoss": ${position.profitLoss || 0},
@@ -255,7 +256,7 @@ Return this JSON structure:
       `{
         "strike": ${hasPosition ? (resistances.find(r => r.price > currentPrice)?.price || currentPrice * 1.05) : (supports.find(s => s.price < currentPrice)?.price || currentPrice * 0.95)},
         "type": "${hasPosition ? 'CALL' : 'PUT'}",
-        "contracts": ${Math.floor(currentShares / 100) || 1},
+        "contracts": ${hasPosition ? -(Math.floor(currentShares / 100) || 1) : 1},
         "reasoning": "Recommended position based on current holdings"
       }`
     }]

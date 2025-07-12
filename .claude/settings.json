@@ -1,0 +1,43 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "comment": "Check browser and remind about docs",
+            "command": "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r \".tool_input.file_path // .tool_input.path\"); if [[ \"$FILE\" =~ (StockAnalysis|TickerPriceSearch)\\.(tsx|css)$ ]]; then echo \"\\n🎨 UI CHANGE DETECTED in: $(basename $FILE)\"; echo \"📸 Remember to check browser at localhost:5174\"; echo \"📚 Remember to check PERFORMANCE_TAB_IMPLEMENTATION.md for current phase\"; echo \"🔍 Use browser-tools to take screenshot\\n\"; fi'"
+          },
+          {
+            "type": "command",
+            "comment": "Run TypeScript and ESLint check on changed files",
+            "command": "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r \".tool_input.file_path // .tool_input.path\"); if [[ \"$FILE\" =~ \\.(tsx?|jsx?)$ ]]; then echo \"\\n🔍 Running TypeScript & ESLint check on $FILE...\"; cd /Users/Killmunger/PortfolioProtector; echo \"\\n📋 TypeScript Check:\"; yarn tsc --noEmit 2>&1 | grep -E \"$FILE|error\" | head -10 || echo \"✅ No TypeScript errors\"; echo \"\\n📋 ESLint Check:\"; yarn eslint \"$FILE\" 2>&1 | head -20 || echo \"✅ No ESLint errors\"; fi'"
+          },
+          {
+            "type": "command",
+            "comment": "Code review checklist reminder",
+            "command": "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r \".tool_input.file_path // .tool_input.path\"); if [[ \"$FILE\" =~ \\.(tsx?|jsx?|css)$ ]]; then echo \"\\n📝 CODE REVIEW CHECKLIST:\"; echo \"- [ ] Searched for existing implementations?\"; echo \"- [ ] Following DRY principles?\"; echo \"- [ ] TypeScript types are strict?\"; echo \"- [ ] No hardcoded values?\"; echo \"- [ ] Edge cases handled?\"; echo \"- [ ] Following existing patterns?\\n\"; fi'"
+          }
+        ]
+      }
+    ],
+    "PreResponse": [
+      {
+        "type": "command", 
+        "comment": "Performance tab implementation check",
+        "command": "bash -c 'if [ -f /Users/Killmunger/PortfolioProtector/docs/PERFORMANCE_TAB_IMPLEMENTATION.md ]; then echo \"\\n📊 PERFORMANCE TAB STATUS:\"; grep -A5 \"## Phase\" /Users/Killmunger/PortfolioProtector/docs/PERFORMANCE_TAB_IMPLEMENTATION.md | grep -E \"(Phase|✅|❌)\" | head -10; fi'"
+      },
+      {
+        "type": "command",
+        "comment": "Polygon integration progress check",
+        "command": "bash -c 'if [ -f /Users/Killmunger/PortfolioProtector/scripts/polygon-integration-tracker.md ]; then echo \"\\n🔄 POLYGON INTEGRATION PROGRESS:\"; grep -E \"^### Phase [0-9]:|^- \\[[ x]\\]\" /Users/Killmunger/PortfolioProtector/scripts/polygon-integration-tracker.md | head -15; fi'"
+      },
+      {
+        "type": "command",
+        "comment": "Check for TODO items",
+        "command": "echo '\\n📋 Remember to check TodoRead for pending tasks!'"
+      }
+    ]
+  }
+}

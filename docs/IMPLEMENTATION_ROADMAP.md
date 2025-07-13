@@ -90,13 +90,14 @@ Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
 - [x] Added wheel strategy recommendations (HOLD/ROLL/LET_ASSIGN)
 - [x] Fixed decimal display to show whole numbers only
 
-#### Phase 3.8: Implement Wheel P&L Patch 🎯 CURRENT
-- [ ] Add optionMTM calculation: (premiumCollected - currentValue) × |contracts|
-- [ ] Add wheelNet calculation: (strike - costBasis) × 100 × |contracts| + premiumCollected
-- [ ] Extract cost basis from portfolio.positions[].purchasePrice
-- [ ] Update frontend to display wheelNet prominently, optionMTM as gray text
-- [ ] Test end-to-end flow with real portfolio data
-- [ ] Verify UI shows correct wheel strategy metrics
+#### Phase 3.8: Implement Wheel P&L Patch ✅ COMPLETED
+- [x] Add optionMTM calculation: (premiumCollected - currentValue) × |contracts|
+- [x] Add wheelNet calculation: (strike - costBasis) × 100 × |contracts| + premiumCollected
+- [x] Extract cost basis from portfolio.positions[].purchasePrice
+- [x] Update frontend to display wheelNet prominently, optionMTM as gray text
+- [x] Test end-to-end flow with real portfolio data
+- [x] Verify UI shows correct wheel strategy metrics
+- [x] Code review and deployment completed
 
 #### Phase 3.9: Fetch Option Greeks from Polygon 🎯 NEXT
 - [ ] After portfolio upload, extract all option positions
@@ -188,9 +189,9 @@ Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
 
 ## Current Focus 🎯
 
-Working on: **Phase 3.8 - Implement Wheel P&L Patch**
+Working on: **Phase 3.9 - Fetch Option Greeks from Polygon**
 
-Next up: **Phase 3.9 - Fetch Option Greeks from Polygon**
+Next up: **Phase 4 - Fix Wheel Strategy Metrics**
 
 ## Success Criteria ✅
 

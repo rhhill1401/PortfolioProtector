@@ -194,7 +194,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
 	
-	const { data: optionChainData, loading: optionChainLoading } = useOptionChain(tickerSymbol);
+	const { data: optionChainData } = useOptionChain(tickerSymbol);
 	
 	// Fetch real-time quotes for wheel positions
 	// Convert date format from 'Jul-18-2025' to '2025-07-18' for API compatibility
@@ -248,7 +248,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	}, [analysisData?.wheelStrategy?.currentPositions]);
 	
 	console.log('🔄 [WHEEL POSITIONS] Formatted for API:', wheelPositions);
-	const { quotes: wheelQuotes, loading: quotesLoading } = useWheelQuotes(wheelPositions);
+	const { quotes: wheelQuotes } = useWheelQuotes(wheelPositions);
 
 	const displayData = analysisData
 		? {
@@ -813,10 +813,12 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																	<span className="font-semibold">${position.currentValue || 'N/A'}</span>
 																</div>
 																<div>
-																	<span className="text-gray-600">P&L: </span>
-																	<span className={`font-semibold ${(position.profitLoss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-																		${Math.round(position.profitLoss || 0)}
+																	<span className="text-gray-600">Strategy P&L: </span>
+																	<span className={`font-bold text-lg ${(position.wheelNet || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+																		${Math.round(position.wheelNet || 0)}
 																	</span>
+																	<br />
+																	<span className="text-xs text-gray-400">MTM: ${Math.round(position.optionMTM || position.profitLoss || 0)}</span>
 																</div>
 															</div>
 														</div>

@@ -167,16 +167,6 @@ async function testIntegratedAnalysis() {
     const portfolioData = await getActualPortfolioData();
     const portfolio = portfolioData.portfolio;
     
-    // Calculate IBIT totals
-    const ibitPositions = portfolio.metadata.optionPositions.filter(opt => opt.symbol === 'IBIT');
-    const totalContracts = ibitPositions.reduce((sum, opt) => sum + Math.abs(opt.contracts), 0);
-    const totalPremium = ibitPositions.reduce((sum, opt) => sum + opt.premiumCollected, 0);
-    
-    console.log('📊 [PORTFOLIO SUMMARY]:');
-    console.log(`- IBIT Positions: ${ibitPositions.length}`);
-    console.log(`- IBIT Total Contracts: ${totalContracts}`);
-    console.log(`- IBIT Total Premium Collected: $${totalPremium.toFixed(2)}\n`);
-
     // Mock chart and research data (same as before)
     const mockChartData = [
       {
@@ -206,6 +196,26 @@ async function testIntegratedAnalysis() {
         close: 67.21
       }
     };
+
+    // Calculate IBIT totals
+    const ibitPositions = portfolio.metadata.optionPositions.filter(opt => opt.symbol === 'IBIT');
+    const totalContracts = ibitPositions.reduce((sum, opt) => sum + Math.abs(opt.contracts), 0);
+    const totalPremium = ibitPositions.reduce((sum, opt) => sum + opt.premiumCollected, 0);
+    
+    console.log('📊 [PORTFOLIO SUMMARY]:');
+    console.log(`- IBIT Positions: ${ibitPositions.length}`);
+    console.log(`- IBIT Total Contracts: ${totalContracts}`);
+    console.log(`- IBIT Total Premium Collected: $${totalPremium.toFixed(2)}`);
+    console.log(`- Current IBIT Price: $${payload.priceContext.current}\n`);
+    
+    // Show intrinsic/extrinsic preview
+    console.log('📈 [POSITION ANALYTICS PREVIEW]:');
+    ibitPositions.forEach(pos => {
+      const intrinsic = Math.max(0, payload.priceContext.current - pos.strike) * 100 * Math.abs(pos.contracts);
+      const extrinsic = Math.max(0, (pos.currentValue * Math.abs(pos.contracts)) - intrinsic);
+      console.log(`- $${pos.strike} CALL: Intrinsic=$${intrinsic}, Extrinsic=$${extrinsic}`);
+    });
+    console.log('');
 
     console.log('📤 [TEST] Sending payload to integrated-analysis...');
     console.log('Payload summary:', {

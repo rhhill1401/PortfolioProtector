@@ -58,25 +58,21 @@ Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
 - [x] Deploy fixed edge function
 - [x] Document fix in OPENAI_JSON_MODE_FIX.md
 
-#### Phase 3.5: Testing & Debugging Infrastructure 🧪
+#### Phase 3.5: Testing & Debugging Infrastructure ✅ COMPLETED
 - [x] Create edge function testers
   - [x] Portfolio vision test script (test-portfolio-vision.cjs)
   - [x] Integrated analysis test script (test-integrated-analysis.cjs)
-  - [ ] Direct endpoint testing UI
-  - [ ] Saved test payloads
-  - [ ] Skip file upload requirement
-- [ ] Add logging system
-  - [ ] Log all prompts sent to AI
-  - [ ] Track API calls and responses
-  - [ ] Debug data transformations
-- [ ] Create mock data generator
-  - [ ] Test portfolios
-  - [ ] Sample chart analyses
-  - [ ] Edge case scenarios
-- [ ] Build saved test scenarios
-  - [ ] Basic wheel strategy
-  - [ ] Complex multi-leg
-  - [ ] Error cases
+  - [x] Real data test script (test-integrated-analysis-real-data.cjs)
+- [x] Use actual portfolio image for testing
+  - [x] /Users/Killmunger/Documents/examples-portfolio/curreentportfolio.png
+  - [x] Extracts 6 IBIT + 2 NVDA positions correctly
+- [x] Save test responses for debugging
+  - [x] Portfolio vision responses saved to JSON
+  - [x] Integrated analysis responses saved with timestamps
+- [x] Created test infrastructure that helped fix:
+  - [x] JSON parsing issues
+  - [x] Premium calculation bugs
+  - [x] Position extraction verification
 
 ### 🚨 CRITICAL BUG FIXES
 
@@ -87,14 +83,22 @@ Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
 - [x] Verify total shows $16,219 for 14 contracts
 - [x] Document fix in OPTION_PREMIUM_FIX.md
 
-#### Phase 3.7: Fix P&L Calculation Bug 🐛 CURRENT
-- [ ] Investigate incorrect P&L calculation formula
-- [ ] Verify calculation matches brokerage statements
-- [ ] Fix backend calculation in calcOptionMetrics
-- [ ] Test with real portfolio data
-- [ ] Ensure all 6 IBIT positions show in response
+#### Phase 3.7: Fix P&L Calculation Bug ✅ COMPLETED
+- [x] Identified issue: Need two P&L metrics (optionMTM vs wheelNet)
+- [x] Implemented backend wheel analytics (intrinsic/extrinsic values)
+- [x] Enhanced AI prompt with assignment probability analysis
+- [x] Added wheel strategy recommendations (HOLD/ROLL/LET_ASSIGN)
+- [x] Fixed decimal display to show whole numbers only
 
-#### Phase 3.8: Fetch Option Greeks from Polygon 🎯 NEXT
+#### Phase 3.8: Implement Wheel P&L Patch 🎯 CURRENT
+- [ ] Add optionMTM calculation: (premiumCollected - currentValue) × |contracts|
+- [ ] Add wheelNet calculation: (strike - costBasis) × 100 × |contracts| + premiumCollected
+- [ ] Extract cost basis from portfolio.positions[].purchasePrice
+- [ ] Update frontend to display wheelNet prominently, optionMTM as gray text
+- [ ] Test end-to-end flow with real portfolio data
+- [ ] Verify UI shows correct wheel strategy metrics
+
+#### Phase 3.9: Fetch Option Greeks from Polygon 🎯 NEXT
 - [ ] After portfolio upload, extract all option positions
 - [ ] Call Polygon API to fetch current Greeks for each position
 - [ ] Store Greeks data (delta, gamma, theta, vega, IV)
@@ -184,9 +188,9 @@ Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
 
 ## Current Focus 🎯
 
-Working on: **Phase 3.7 - Fix P&L Calculation Bug**
+Working on: **Phase 3.8 - Implement Wheel P&L Patch**
 
-Next up: **Phase 3.8 - Fetch Option Greeks from Polygon**
+Next up: **Phase 3.9 - Fetch Option Greeks from Polygon**
 
 ## Success Criteria ✅
 

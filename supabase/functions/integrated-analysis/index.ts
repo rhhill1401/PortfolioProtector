@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     }>;
     totalValue?: number;
     rawFiles?: string[];
-    metadata?: any; // Added to match frontend usage
+    metadata?: Record<string, unknown>;
   }
 
   interface KeyLevel {
@@ -90,10 +90,8 @@ Deno.serve(async (req) => {
 
   const { ticker,
           portfolio,
-          charts = [],
           chartMetrics = [],
-          priceContext,
-          research = [] } = body ?? {};
+          priceContext } = body ?? {};
 
   if (!ticker) return json({ success: false, error: "ticker required" }, 400);
   if (!OPENAI_API_KEY)
@@ -111,57 +109,74 @@ Deno.serve(async (req) => {
     .filter(l => l.type === "Resistance")
     .sort((a, b) => a.price - b.price); // Lowest to highest
 
-      // Added: concise level summary for prompt
-  const lvlSummary = `Resistances: ${resistances.map(r => `$${r.price.toFixed(2)}`).join(", ")} | Supports: ${supports.map(s => `$${s.price.toFixed(2)}`).join(", ")}`;
-
-
   const currentPrice = priceContext?.current || 0;
-  const openPrice = priceContext?.open || 0;
   const highPrice = priceContext?.high || 0;
   const lowPrice = priceContext?.low || 0;
-  const closePrice = priceContext?.close || 0;
-  const volume = priceContext?.volume || 0;
   
-  // Find nearest support and resistance
-  const nearestSupport = supports.find(s => s.price < currentPrice) || supports[0];
-  const nearestResistance = resistances.find(r => r.price > currentPrice) || resistances[0];
-
   // 🎯 WHEEL STRATEGY ANALYSIS - Detect portfolio position and wheel phase
   const hasPosition = portfolio?.positions?.some(p => p.symbol === ticker) || false;
   const currentShares = portfolio?.positions?.find(p => p.symbol === ticker)?.quantity || 0;
   const costBasis = portfolio?.positions?.find(p => p.symbol === ticker)?.purchasePrice || currentPrice;
-  const shareContracts = Math.floor(currentShares / 100);
   
   // 📊 EXTRACT ACTUAL OPTION POSITIONS from portfolio metadata
   
   /** ───────── OPTION METRICS PRE-COMPUTE ───────── */
   interface CalculatedOption extends Record<string, unknown> {
     profitLoss: number;
-    cycleReturn: number;      // % of premium captured (optional)
+    cycleReturn: number;
+    intrinsic: number;
+    extrinsic: number;
+    optionMTM: number;
+    wheelNet: number;
   }
   
-  function calcOptionMetrics(opt: any): CalculatedOption {
+  function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number): CalculatedOption {
     const prem = Number(opt.premiumCollected) || 0;
     const cur  = Number(opt.currentValue)     || 0;
     const cnt  = Math.abs(Number(opt.contracts) || 1);
-    const pl   = (prem - cur) * cnt;                   // positive = profit on a short option
-    const ret  = prem > 0 ? (pl / prem) * 100 : 0;
-    return { ...opt, profitLoss: pl, cycleReturn: Number(ret.toFixed(2)) };
+    const strike = Number(opt.strike) || 0;
+    const isCall = opt.optionType === 'CALL';
+    
+    const pl = opt.position === 'SHORT' ? prem - cur : cur - prem;
+    
+    // Percent return on capital at risk
+    const capital = opt.position === 'SHORT' ? Math.abs(prem) : Math.abs(prem);
+    const ret = capital > 0 ? (pl / capital) * 100 : 0;
+    
+    const intrinsic = isCall 
+      ? Math.max(0, spotPrice - strike) * 100 * cnt
+      : Math.max(0, strike - spotPrice) * 100 * cnt;
+    const extrinsic = Math.max(0, cur - intrinsic);
+    
+    const optionMTM = opt.position === 'SHORT' ? prem - cur : cur - prem;
+    const shareGain = isCall 
+      ? (strike - costBasis) * 100 * cnt
+      : (costBasis - strike) * 100 * cnt;
+    const wheelNet = shareGain + prem;
+    
+    return { 
+      ...opt, 
+      profitLoss: Math.round(pl),
+      cycleReturn: Number(ret.toFixed(2)),
+      intrinsic: Math.round(intrinsic),
+      extrinsic: Math.round(extrinsic),
+      optionMTM: Math.round(optionMTM),
+      wheelNet: Math.round(wheelNet)
+    };
   }
   
-  const optionPositions = (portfolio?.metadata?.optionPositions || []).map(calcOptionMetrics);
+  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => 
+    calcOptionMetrics(opt, currentPrice, costBasis)
+  );
   const currentOptionPositions =
-    optionPositions.filter((opt: any) => opt.symbol?.startsWith(ticker));
+    optionPositions.filter((opt: Record<string, unknown>) => (opt.symbol as string)?.startsWith(ticker));
   
-  // Calculate total premium collected across ALL positions
-  // Note: premiumCollected is already the total for that position, not per contract
-  const totalPremiumCollected = currentOptionPositions.reduce((total: number, opt: any) => {
+  const totalPremiumCollected = currentOptionPositions.reduce((total: number, opt: Record<string, unknown>) => {
     const prem = Number(opt.premiumCollected) || 0;
     return total + prem;
   }, 0);
   
-  // Count total contracts
-  const totalContracts = currentOptionPositions.reduce((total: number, opt: any) => {
+  const totalContracts = currentOptionPositions.reduce((total: number, opt: Record<string, unknown>) => {
     return total + Math.abs(Number(opt.contracts) || 0);
   }, 0);
   
@@ -178,7 +193,7 @@ Deno.serve(async (req) => {
   
   // Log all option positions for debugging
   console.log('📊 [ALL OPTION POSITIONS] Raw data:', 
-    optionPositions.map((opt: any) => ({
+    optionPositions.map((opt: Record<string, unknown>) => ({
       symbol: opt.symbol,
       strike: opt.strike,
       contracts: opt.contracts,
@@ -242,11 +257,6 @@ Deno.serve(async (req) => {
   const macd = firstMetric?.macd || 'Unknown';  
   const trend = firstMetric?.trend || 'Unknown';
 
-  // Format portfolio positions
-  const portfolioSummary = portfolio?.positions?.length ? 
-    portfolio.positions.map(p => 
-      `${p.symbol}: ${p.quantity} shares @ $${p.purchasePrice || 'N/A'}`
-    ).join(', ') : 'No current positions';
 
   // Build comprehensive WHEEL STRATEGY prompt
   const prompt = `
@@ -264,10 +274,21 @@ ${currentOptionPositions.length > 0 ?
 `UPLOADED OPTION POSITIONS (${currentOptionPositions.length} positions):
 ${currentOptionPositions.map((opt: unknown, index: number) => {
   const position = opt as Record<string, unknown>;
-  return `${index + 1}. $${position.strike} ${position.optionType} expiring ${position.expiry}, ${Math.abs(Number(position.contracts))} contracts, Premium: $${position.premiumCollected || 'Unknown'}, P&L: $${position.profitLoss || 'Unknown'}`;
+  return `${index + 1}. $${position.strike} ${position.optionType} expiring ${position.expiry}
+   - Contracts: ${position.contracts} (${position.position})
+   - Premium Collected: $${position.premiumCollected || 0}
+   - Current Value: $${position.currentValue || 0}
+   - P&L: $${position.profitLoss || 0}
+   - Intrinsic Value: $${position.intrinsic || 0}
+   - Extrinsic Value: $${position.extrinsic || 0}
+   - Days to Expiry: ${position.daysToExpiry || 'Unknown'}`;
 }).join('\n')}
 
-TASK: Analyze these ACTUAL uploaded positions. Calculate real performance metrics, assignment probabilities, and specific recommendations for each position.` 
+TASK: For each position above, provide wheel strategy analysis:
+1. Calculate assignment probability based on how far ITM/OTM (use intrinsic value)
+2. Analyze opportunity cost if assigned vs premium collected
+3. Recommend action: HOLD (let theta decay), ROLL (to new strike/expiry), or LET ASSIGN
+4. Provide specific reasoning for each recommendation` 
 : 
 `No option positions detected. Generate wheel strategy recommendations.`}
 
@@ -291,8 +312,15 @@ Return this JSON structure:
         "premium": ${position.premiumCollected || 0},
         "currentValue": ${position.currentValue || 0},
         "profitLoss": ${position.profitLoss || 0},
-        "analysis": "Calculate: profitable/losing, assignment risk, recommended action",
-        "nextAction": "Hold/Roll/Close with specific reasoning"
+        "intrinsic": ${position.intrinsic || 0},
+        "extrinsic": ${position.extrinsic || 0},
+        "optionMTM": ${position.optionMTM || 0},
+        "wheelNet": ${position.wheelNet || 0},
+        "assignmentProbability": "Calculate based on intrinsic value and DTE",
+        "opportunityCost": "Calculate missed upside if assigned at strike",
+        "analysis": "Detailed wheel strategy analysis",
+        "recommendation": "HOLD/ROLL/LET_ASSIGN",
+        "reasoning": "Specific reasoning based on theta decay, assignment risk, and opportunity cost"
       }`;
       }).join(',\n      ')
       :

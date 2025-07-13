@@ -87,11 +87,14 @@
 - All dollar amounts now display as whole numbers (no decimals)
 - Documentation created in `/docs/OPTION_PREMIUM_FIX.md`
 
-### Still To Fix
-- P&L calculation formula needs verification (user reports it's incorrect)
-- Need to investigate why only 3 positions show in AI response (should be 6)
+### Current Work - Phase 3.8: Wheel P&L Patch
+- Implementing two P&L metrics: optionMTM (mark-to-market) and wheelNet (strategy profit)
+- Using real cost basis from portfolio positions ($59 for IBIT)
+- Frontend will display wheelNet prominently, optionMTM as gray text
+- Testing with end-to-end flow using real portfolio image
 
 ## Next Session Instructions
-1. Increase max_tokens in integrated-analysis to prevent AI truncation
-2. Test P&L calculations are correct for all positions
-3. Continue with Phase 4 implementation
+1. Complete Phase 3.8 wheel P&L implementation
+2. Test end-to-end flow with real data
+3. Verify UI displays correct metrics
+4. Run code review hook after completion

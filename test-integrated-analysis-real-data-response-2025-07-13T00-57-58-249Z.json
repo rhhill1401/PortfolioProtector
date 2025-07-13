@@ -1,0 +1,156 @@
+{
+  "success": true,
+  "analysis": {
+    "wheelStrategy": {
+      "shareCount": 1400,
+      "currentPhase": "COVERED_CALL",
+      "currentPositions": [
+        {
+          "strike": 61,
+          "expiry": "2025-07-18",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 228.32,
+          "currentValue": 635,
+          "profitLoss": -407,
+          "intrinsic": 621,
+          "extrinsic": 62879,
+          "assignmentProbability": "High due to intrinsic value being positive and close to expiry",
+          "opportunityCost": "Minimal as the strike is below current price, but premium collected offsets some loss",
+          "analysis": "The option is deep ITM with a high chance of assignment. The premium collected is small compared to the intrinsic value.",
+          "recommendation": "LET_ASSIGN",
+          "reasoning": "With only 6 days to expiry and deep ITM, letting it assign is optimal to capture intrinsic value."
+        },
+        {
+          "strike": 62,
+          "expiry": "2025-08-15",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 359.32,
+          "currentValue": 674,
+          "profitLoss": -315,
+          "intrinsic": 521,
+          "extrinsic": 66879,
+          "assignmentProbability": "Moderate due to intrinsic value and time to expiry",
+          "opportunityCost": "Moderate as the strike is below current price, but premium collected helps offset",
+          "analysis": "The option is ITM with a moderate chance of assignment. The premium collected is decent.",
+          "recommendation": "HOLD",
+          "reasoning": "With 34 days to expiry, holding allows for potential theta decay to reduce loss."
+        },
+        {
+          "strike": 63,
+          "expiry": "2025-08-15",
+          "type": "CALL",
+          "contracts": -4,
+          "premium": 1232.28,
+          "currentValue": 2404,
+          "profitLoss": -8384,
+          "intrinsic": 1684,
+          "extrinsic": 959916,
+          "assignmentProbability": "High due to significant intrinsic value",
+          "opportunityCost": "High as the strike is below current price, leading to potential loss if assigned",
+          "analysis": "Deep ITM with high assignment risk. Significant intrinsic value loss potential.",
+          "recommendation": "ROLL",
+          "reasoning": "Rolling to a higher strike or later expiry could mitigate potential losses."
+        },
+        {
+          "strike": 70,
+          "expiry": "2027-12-17",
+          "type": "CALL",
+          "contracts": -2,
+          "premium": 3948.58,
+          "currentValue": 4386,
+          "profitLoss": -4823,
+          "intrinsic": 0,
+          "extrinsic": 877200,
+          "assignmentProbability": "Low as it is OTM with no intrinsic value",
+          "opportunityCost": "Low as the strike is above current price",
+          "analysis": "OTM with low assignment risk and significant time value remaining.",
+          "recommendation": "HOLD",
+          "reasoning": "With 888 days to expiry, holding allows for potential extrinsic value decay."
+        },
+        {
+          "strike": 80,
+          "expiry": "2027-12-17",
+          "type": "CALL",
+          "contracts": -5,
+          "premium": 8646.45,
+          "currentValue": 9400,
+          "profitLoss": -38354,
+          "intrinsic": 0,
+          "extrinsic": 4700000,
+          "assignmentProbability": "Very low as it is significantly OTM",
+          "opportunityCost": "Very low as the strike is well above current price",
+          "analysis": "Deep OTM with very low assignment risk and high extrinsic value.",
+          "recommendation": "HOLD",
+          "reasoning": "Holding is optimal due to low assignment risk and potential for extrinsic value decay."
+        },
+        {
+          "strike": 90,
+          "expiry": "2027-12-17",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 1804.32,
+          "currentValue": 1610,
+          "profitLoss": 194,
+          "intrinsic": 0,
+          "extrinsic": 161000,
+          "assignmentProbability": "Very low as it is significantly OTM",
+          "opportunityCost": "Very low as the strike is well above current price",
+          "analysis": "Deep OTM with very low assignment risk and high extrinsic value.",
+          "recommendation": "HOLD",
+          "reasoning": "Holding is optimal due to low assignment risk and potential for extrinsic value decay."
+        }
+      ]
+    },
+    "summary": {
+      "currentPrice": 67.21,
+      "wheelPhase": "COVERED_CALL",
+      "overallAssessment": "The portfolio is primarily in a holding pattern with some positions needing adjustment due to high assignment risk."
+    },
+    "recommendation": [
+      {
+        "name": "Sell Calls",
+        "value": 7
+      },
+      {
+        "name": "Wait",
+        "value": 2
+      },
+      {
+        "name": "Close Position",
+        "value": 1
+      }
+    ],
+    "technicalFactors": [
+      {
+        "factor": "Strike Selection",
+        "value": "USE ONLY PROVIDED PRICES",
+        "interpretation": "Calculate percentage out-of-the-money",
+        "impact": "Assess risk/reward",
+        "score": "8"
+      }
+    ],
+    "entryPoints": [
+      {
+        "zone": "Covered Call Strike",
+        "price": "SELECT FROM PROVIDED RESISTANCE/SUPPORT LEVELS",
+        "timing": "45 days to expiration",
+        "rationale": "Select strikes based on current price and potential resistance levels to optimize premium collection."
+      }
+    ],
+    "exitPoints": [
+      {
+        "target": "50% Profit Target",
+        "gain": "50% of max profit",
+        "timeframe": "20-25 days"
+      }
+    ],
+    "actionPlan": [
+      "Monitor positions closely for potential assignment risks, especially those deep ITM.",
+      "Consider rolling ITM positions to mitigate potential losses and capture additional premium.",
+      "Maintain OTM positions to benefit from theta decay and extrinsic value reduction."
+    ],
+    "optionsStrategy": "The current strategy involves managing covered calls with a focus on maximizing premium collection while minimizing assignment risk. Adjustments are recommended for ITM positions to optimize returns."
+  }
+}

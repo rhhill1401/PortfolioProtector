@@ -99,12 +99,15 @@ Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
 - [x] Verify UI shows correct wheel strategy metrics
 - [x] Code review and deployment completed
 
-#### Phase 3.9: Fetch Option Greeks from Polygon 🎯 NEXT
-- [ ] After portfolio upload, extract all option positions
-- [ ] Call Polygon API to fetch current Greeks for each position
-- [ ] Store Greeks data (delta, gamma, theta, vega, IV)
-- [ ] Make Greeks available for wheel strategy recommendations
-- [ ] Cache Greeks data to avoid repeated API calls
+#### Phase 3.9: Fetch Option Greeks from Polygon ✅ COMPLETED
+- [x] After portfolio upload, extract all option positions
+- [x] Call Polygon API to fetch current Greeks for each position
+- [x] Store Greeks data (delta, gamma, theta, vega, IV)
+- [x] Make Greeks available for wheel strategy recommendations
+- [x] Cache Greeks data to avoid repeated API calls
+- [x] Display Greeks and assignment probability in UI
+- [x] Rate limiting implementation (5 requests/minute)
+- [x] 1-hour cache with stale data indicators
 
 ### 🎯 NEAR-TERM PHASES (Complete Core Features)
 
@@ -189,9 +192,9 @@ Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
 
 ## Current Focus 🎯
 
-Working on: **Phase 3.9 - Fetch Option Greeks from Polygon**
+Working on: **Phase 4 - Fix Wheel Strategy Metrics**
 
-Next up: **Phase 4 - Fix Wheel Strategy Metrics**
+Next up: **Phase 5 - Number Formatting**
 
 ## Success Criteria ✅
 

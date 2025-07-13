@@ -72,6 +72,26 @@ Deno.serve(async (req) => {
     rangeDays?: number;
   }
 
+  interface OptionQuote {
+    ticker: string;
+    strike: number;
+    expiry: string;
+    type: string;
+    dte: number;
+    mid: number;
+    bid: number | null;
+    ask: number | null;
+    delta: number | null;
+    gamma: number | null;
+    theta: number | null;
+    vega: number | null;
+    iv: number | null;
+    openInterest: number | null;
+    dayVolume: number | null;
+    lastUpdated: number;
+    isStale?: boolean;
+  }
+
   let body:
     | {
         ticker?: string;
@@ -80,6 +100,7 @@ Deno.serve(async (req) => {
         chartMetrics?: ChartMetric[];
         priceContext?: PriceContext;
         research?: unknown[];
+        optionGreeks?: Record<string, OptionQuote>;
       }
     | undefined;
   try {
@@ -91,7 +112,8 @@ Deno.serve(async (req) => {
   const { ticker,
           portfolio,
           chartMetrics = [],
-          priceContext } = body ?? {};
+          priceContext,
+          optionGreeks = {} } = body ?? {};
 
   if (!ticker) return json({ success: false, error: "ticker required" }, 400);
   if (!OPENAI_API_KEY)
@@ -130,7 +152,7 @@ Deno.serve(async (req) => {
     wheelNet: number;
   }
   
-  function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number): CalculatedOption {
+  function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number, greeks?: OptionQuote): CalculatedOption {
     const prem = Number(opt.premiumCollected) || 0;
     const cur  = Number(opt.currentValue)     || 0;
     const cnt  = Math.abs(Number(opt.contracts) || 1);
@@ -154,6 +176,13 @@ Deno.serve(async (req) => {
       : (costBasis - strike) * 100 * cnt;
     const wheelNet = shareGain + prem;
     
+    // Add Greeks if available
+    const delta = greeks?.delta as number | null || null;
+    const gamma = greeks?.gamma as number | null || null;
+    const theta = greeks?.theta as number | null || null;
+    const vega = greeks?.vega as number | null || null;
+    const iv = greeks?.iv as number | null || null;
+    
     return { 
       ...opt, 
       profitLoss: Math.round(pl),
@@ -161,13 +190,39 @@ Deno.serve(async (req) => {
       intrinsic: Math.round(intrinsic),
       extrinsic: Math.round(extrinsic),
       optionMTM: Math.round(optionMTM),
-      wheelNet: Math.round(wheelNet)
+      wheelNet: Math.round(wheelNet),
+      delta,
+      gamma,
+      theta,
+      vega,
+      iv
     };
   }
   
-  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => 
-    calcOptionMetrics(opt, currentPrice, costBasis)
-  );
+  // Debug: Log optionGreeks to see what we received
+  console.log('🔍 [DEBUG] optionGreeks received:', {
+    hasOptionGreeks: !!optionGreeks,
+    optionGreeksType: typeof optionGreeks,
+    optionGreeksKeys: Object.keys(optionGreeks || {}),
+    firstKey: Object.keys(optionGreeks || {})[0],
+    firstValue: optionGreeks?.[Object.keys(optionGreeks || {})[0]]
+  });
+
+  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => {
+    // Get Greeks for this position if available
+    const positionKey = `${opt.symbol}-${opt.strike}-${opt.expiry}-${opt.optionType}`;
+    const positionGreeks = optionGreeks[positionKey] as OptionQuote | undefined;
+    
+    // Debug: Log each position lookup
+    console.log(`🔍 [DEBUG] Looking up Greeks for position:`, {
+      position: `${opt.symbol} ${opt.strike} ${opt.expiry} ${opt.optionType}`,
+      positionKey,
+      greeksFound: !!positionGreeks,
+      delta: positionGreeks?.delta
+    });
+    
+    return calcOptionMetrics(opt, currentPrice, costBasis, positionGreeks);
+  });
   const currentOptionPositions =
     optionPositions.filter((opt: Record<string, unknown>) => (opt.symbol as string)?.startsWith(ticker));
   
@@ -271,8 +326,8 @@ PORTFOLIO DATA:
 • Total Premium Collected: $${totalPremiumCollected.toFixed(2)}
 
 ${currentOptionPositions.length > 0 ? 
-`UPLOADED OPTION POSITIONS (${currentOptionPositions.length} positions):
-${currentOptionPositions.map((opt: unknown, index: number) => {
+`UPLOADED OPTION POSITIONS (${currentOptionPositions.length} positions${currentOptionPositions.length > 15 ? ', showing first 15' : ''}):
+${currentOptionPositions.slice(0, 15).map((opt: unknown, index: number) => {
   const position = opt as Record<string, unknown>;
   return `${index + 1}. $${position.strike} ${position.optionType} expiring ${position.expiry}
    - Contracts: ${position.contracts} (${position.position})
@@ -281,14 +336,18 @@ ${currentOptionPositions.map((opt: unknown, index: number) => {
    - P&L: $${position.profitLoss || 0}
    - Intrinsic Value: $${position.intrinsic || 0}
    - Extrinsic Value: $${position.extrinsic || 0}
-   - Days to Expiry: ${position.daysToExpiry || 'Unknown'}`;
-}).join('\n')}
+   - Days to Expiry: ${position.daysToExpiry || 'Unknown'}
+   - Delta: ${position.delta !== null ? position.delta : 'N/A'}
+   - Theta: ${position.theta !== null ? `$${Number(position.theta).toFixed(2)}/day` : 'N/A'}
+   - IV: ${position.iv !== null ? `${(Number(position.iv) * 100).toFixed(1)}%` : 'N/A'}`;
+}).join('\n')}${currentOptionPositions.length > 15 ? `\n... and ${currentOptionPositions.length - 15} more positions (truncated to stay within token limit)` : ''}
 
 TASK: For each position above, provide wheel strategy analysis:
-1. Calculate assignment probability based on how far ITM/OTM (use intrinsic value)
+1. Calculate assignment probability (use Delta if available, otherwise estimate from intrinsic value)
 2. Analyze opportunity cost if assigned vs premium collected
-3. Recommend action: HOLD (let theta decay), ROLL (to new strike/expiry), or LET ASSIGN
-4. Provide specific reasoning for each recommendation` 
+3. Consider theta decay rate when making recommendations
+4. Recommend action: HOLD (let theta decay), ROLL (to new strike/expiry), or LET ASSIGN
+5. Provide specific reasoning for each recommendation based on Greeks` 
 : 
 `No option positions detected. Generate wheel strategy recommendations.`}
 
@@ -302,7 +361,7 @@ Return this JSON structure:
     "shareCount": ${currentShares},
     "currentPhase": "${wheelPhase}",
     "currentPositions": [${currentOptionPositions.length > 0 ? 
-      currentOptionPositions.map((opt: unknown) => {
+      currentOptionPositions.slice(0, 15).map((opt: unknown) => {
         const position = opt as Record<string, unknown>;
         return `{
         "strike": ${position.strike || 0},
@@ -316,11 +375,16 @@ Return this JSON structure:
         "extrinsic": ${position.extrinsic || 0},
         "optionMTM": ${position.optionMTM || 0},
         "wheelNet": ${position.wheelNet || 0},
-        "assignmentProbability": "Calculate based on intrinsic value and DTE",
+        "delta": ${position.delta !== null ? position.delta : null},
+        "gamma": ${position.gamma !== null ? position.gamma : null},
+        "theta": ${position.theta !== null ? position.theta : null},
+        "vega": ${position.vega !== null ? position.vega : null},
+        "iv": ${position.iv !== null ? position.iv : null},
+        "assignmentProbability": ${position.delta !== null ? `"${(Math.abs(Number(position.delta)) * 100).toFixed(1)}%"` : '"Calculate from intrinsic value"'},
         "opportunityCost": "Calculate missed upside if assigned at strike",
-        "analysis": "Detailed wheel strategy analysis",
+        "analysis": "Detailed wheel strategy analysis using Greeks",
         "recommendation": "HOLD/ROLL/LET_ASSIGN",
-        "reasoning": "Specific reasoning based on theta decay, assignment risk, and opportunity cost"
+        "reasoning": "Specific reasoning based on Greeks and market conditions"
       }`;
       }).join(',\n      ')
       :

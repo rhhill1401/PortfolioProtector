@@ -1,0 +1,154 @@
+{
+  "success": true,
+  "portfolio": {
+    "portfolioDetected": true,
+    "brokerageType": "Unknown",
+    "positions": [
+      {
+        "symbol": "IBIT",
+        "quantity": 1400,
+        "purchasePrice": 59.09,
+        "currentPrice": 67.21,
+        "marketValue": 94094,
+        "percentChange": "+13.74%",
+        "gainLoss": 11372.33
+      },
+      {
+        "symbol": "NVDA",
+        "quantity": 200,
+        "purchasePrice": 118.87,
+        "currentPrice": 164.92,
+        "marketValue": 32984,
+        "percentChange": "+38.74%",
+        "gainLoss": 9210.25
+      }
+    ],
+    "metadata": {
+      "optionPositions": [
+        {
+          "symbol": "IBIT",
+          "optionType": "CALL",
+          "strike": 61,
+          "expiry": "2025-07-18",
+          "contracts": -1,
+          "position": "SHORT",
+          "premiumCollected": 228.32,
+          "currentValue": 635,
+          "daysToExpiry": 5,
+          "profitLoss": -406.68,
+          "percentReturn": "-178.12%",
+          "status": "Open",
+          "term": "SHORT_DATED"
+        },
+        {
+          "symbol": "IBIT",
+          "optionType": "CALL",
+          "strike": 62,
+          "expiry": "2025-08-15",
+          "contracts": -1,
+          "position": "SHORT",
+          "premiumCollected": 359.32,
+          "currentValue": 674,
+          "daysToExpiry": 33,
+          "profitLoss": -314.68,
+          "percentReturn": "-87.58%",
+          "status": "Open",
+          "term": "SHORT_DATED"
+        },
+        {
+          "symbol": "IBIT",
+          "optionType": "CALL",
+          "strike": 63,
+          "expiry": "2025-08-15",
+          "contracts": -4,
+          "position": "SHORT",
+          "premiumCollected": 1232.28,
+          "currentValue": 2404,
+          "daysToExpiry": 33,
+          "profitLoss": -1171.72,
+          "percentReturn": "-95.09%",
+          "status": "Open",
+          "term": "SHORT_DATED"
+        },
+        {
+          "symbol": "IBIT",
+          "optionType": "CALL",
+          "strike": 70,
+          "expiry": "2027-12-17",
+          "contracts": -2,
+          "position": "SHORT",
+          "premiumCollected": 3948.58,
+          "currentValue": 4386,
+          "daysToExpiry": 887,
+          "profitLoss": -437.42,
+          "percentReturn": "-11.08%",
+          "status": "Open",
+          "term": "LONG_DATED"
+        },
+        {
+          "symbol": "IBIT",
+          "optionType": "CALL",
+          "strike": 80,
+          "expiry": "2027-12-17",
+          "contracts": -5,
+          "position": "SHORT",
+          "premiumCollected": 8646.45,
+          "currentValue": 9400,
+          "daysToExpiry": 887,
+          "profitLoss": -753.55,
+          "percentReturn": "-8.72%",
+          "status": "Open",
+          "term": "LONG_DATED"
+        },
+        {
+          "symbol": "IBIT",
+          "optionType": "CALL",
+          "strike": 90,
+          "expiry": "2027-12-17",
+          "contracts": -1,
+          "position": "SHORT",
+          "premiumCollected": 1804.32,
+          "currentValue": 1610,
+          "daysToExpiry": 887,
+          "profitLoss": 194.32,
+          "percentReturn": "+10.76%",
+          "status": "Open",
+          "term": "LONG_DATED"
+        },
+        {
+          "symbol": "NVDA",
+          "optionType": "CALL",
+          "strike": 190,
+          "expiry": "2027-12-17",
+          "contracts": -1,
+          "position": "SHORT",
+          "premiumCollected": 3439.32,
+          "currentValue": 3756,
+          "daysToExpiry": 887,
+          "profitLoss": -316.68,
+          "percentReturn": "-9.21%",
+          "status": "Open",
+          "term": "LONG_DATED"
+        },
+        {
+          "symbol": "NVDA",
+          "optionType": "CALL",
+          "strike": 200,
+          "expiry": "2027-12-17",
+          "contracts": -1,
+          "position": "SHORT",
+          "premiumCollected": 3404.32,
+          "currentValue": 3440,
+          "daysToExpiry": 887,
+          "profitLoss": -35.68,
+          "percentReturn": "-1.05%",
+          "status": "Open",
+          "term": "LONG_DATED"
+        }
+      ]
+    },
+    "totalValue": 127078.66,
+    "extractionConfidence": "high",
+    "extractionNotes": "All positions clearly visible"
+  }
+}

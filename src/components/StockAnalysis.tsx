@@ -821,6 +821,51 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																	<span className="text-xs text-gray-400">MTM: ${Math.round(position.optionMTM || position.profitLoss || 0)}</span>
 																</div>
 															</div>
+															
+															{/* Greeks Display */}
+															<div className="grid grid-cols-2 gap-4 text-sm mt-3 pt-3 border-t">
+																<div>
+																	<span className="text-gray-600">Delta: </span>
+																	<span className="font-semibold">
+																		{position.delta !== null && position.delta !== undefined ? position.delta.toFixed(3) : 'N/A'}
+																	</span>
+																</div>
+																<div>
+																	<span className="text-gray-600">Theta: </span>
+																	<span className="font-semibold">
+																		{position.theta !== null && position.theta !== undefined ? `$${position.theta.toFixed(2)}/day` : 'N/A'}
+																	</span>
+																</div>
+																<div>
+																	<span className="text-gray-600">Gamma: </span>
+																	<span className="font-semibold">
+																		{position.gamma !== null && position.gamma !== undefined ? position.gamma.toFixed(3) : 'N/A'}
+																	</span>
+																</div>
+																<div>
+																	<span className="text-gray-600">IV: </span>
+																	<span className="font-semibold">
+																		{position.iv !== null && position.iv !== undefined ? `${(position.iv * 100).toFixed(1)}%` : 'N/A'}
+																	</span>
+																</div>
+															</div>
+															
+															{/* Assignment Probability based on Delta */}
+															{position.delta !== null && position.delta !== undefined && (
+																<div className="mt-3 pt-3 border-t">
+																	<span className="text-gray-600">Assignment Probability: </span>
+																	<span className={`font-bold ${
+																		Math.abs(position.delta) > 0.7 ? 'text-red-600' :
+																		Math.abs(position.delta) > 0.3 ? 'text-yellow-600' :
+																		'text-green-600'
+																	}`}>
+																		{(Math.abs(position.delta) * 100).toFixed(1)}%
+																	</span>
+																	<span className="text-xs text-gray-500 ml-2">
+																		(based on delta)
+																	</span>
+																</div>
+															)}
 														</div>
 													</div>
 												);

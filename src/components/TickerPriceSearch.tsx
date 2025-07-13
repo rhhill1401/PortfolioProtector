@@ -15,6 +15,8 @@ import {
 	initialReadiness,
 	UploadCategory,
 } from '@/types/analysis';
+import { greeksFetcher, type OptionPosition } from '@/services/greeksFetcher';
+import type { OptionQuote } from '@/services/optionLookup';
 
 /* ---------- types ---------- */
 
@@ -287,6 +289,9 @@ export function TickerPriceSearch({
 	const [parsedPortfolio, setParsedPortfolio] =
 		useState<PortfolioParseResult | null>(null);
 	const [isParsingPortfolio, setIsParsingPortfolio] = useState(false);
+	// Option Greeks state
+	const [optionGreeks, setOptionGreeks] = useState<Map<string, OptionQuote>>(new Map());
+	const [isFetchingGreeks, setIsFetchingGreeks] = useState(false);
 	// Existing API key
 	const apiKey = import.meta.env.VITE_MARKETSTACK_API_KEY;
 	const [processedChartData, setProcessedChartData] = useState<
@@ -401,6 +406,7 @@ export function TickerPriceSearch({
 					name: f.file.name,
 				})),
 				priceContext, // Added
+				optionGreeks: Object.fromEntries(optionGreeks), // Convert Map to object for JSON
 			};
 			
 			console.log('🚀 [AI REQUEST DEBUG] Complete Payload Sent to /integrated-analysis:', {
@@ -646,6 +652,60 @@ export function TickerPriceSearch({
 					totalValue: portfolioResult.totalValue,
 					source: portfolioResult.metadata?.source || 'csv'
 				});
+				
+				// Fetch Greeks for all option positions
+				if (portfolioResult.metadata?.optionPositions?.length > 0) {
+					console.log('📊 [GREEKS] Starting to fetch Greeks for option positions...');
+					setIsFetchingGreeks(true);
+					
+					try {
+						// Convert date format from "Jul-18-2025" to "2025-07-18"
+						const convertDateFormat = (dateStr: string): string => {
+							const months: Record<string, string> = {
+								'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+								'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+								'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+							};
+							
+							// Check if already in ISO format
+							if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+								return dateStr;
+							}
+							
+							// Convert from "Jul-18-2025" to "2025-07-18"
+							const parts = dateStr.split('-');
+							if (parts.length === 3) {
+								const monthNum = months[parts[0]];
+								if (monthNum) {
+									return `${parts[2]}-${monthNum}-${parts[1].padStart(2, '0')}`;
+								}
+							}
+							
+							console.warn(`⚠️ [GREEKS] Unable to convert date format: ${dateStr}`);
+							return dateStr;
+						};
+						
+						// Convert dates in option positions
+						const optionPositions = (portfolioResult.metadata.optionPositions as OptionPosition[])
+							.map(pos => ({
+								...pos,
+								expiry: convertDateFormat(pos.expiry)
+							}));
+						
+						console.log('📅 [GREEKS] Date conversion sample:', {
+							original: portfolioResult.metadata.optionPositions[0]?.expiry,
+							converted: optionPositions[0]?.expiry
+						});
+						
+						const greeksData = await greeksFetcher.fetchGreeksForPositions(optionPositions);
+						setOptionGreeks(greeksData);
+						console.log(`✅ [GREEKS] Successfully fetched Greeks for ${greeksData.size} positions`);
+					} catch (error) {
+						console.error('❌ [GREEKS] Failed to fetch Greeks:', error);
+					} finally {
+						setIsFetchingGreeks(false);
+					}
+				}
 			} else {
 				console.log('❌ [PORTFOLIO UPLOAD] No portfolio data extracted from any files');
 			}

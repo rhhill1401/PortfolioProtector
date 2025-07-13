@@ -22,22 +22,24 @@ Based on the spec provided, tracking progress for replacing mock wheel metrics w
 
 ## Progress Checklist
 
-### Phase 1: Environment Setup ⏳
+### Phase 1: Environment Setup ✅
 - [x] Add `VITE_POLYGON_API_KEY` to `.env.local`
-- [ ] Add `POLYGON_API_KEY` to Supabase edge function environment (requires manual Supabase dashboard)
-- [ ] Verify both environments can access the key
+- [x] Add `POLYGON_API_KEY` to Supabase edge function environment
+- [x] Verify both environments can access the key (tested with valid API key)
 - [x] Update `.env.example` with new variable
 - [x] Clean up redundant .env file and update .gitignore
 
-### Phase 2: Edge Function ⏳
+### Phase 2: Edge Function ✅
 - [x] Create `/supabase/functions/option-chain/index.ts`
 - [x] Implement `transformPolygon()` to filter by:
   - Expiries 20-60 days out
   - Delta 0.30-0.35 for calls
   - Return nearest to 0.325 delta
-- [ ] Test with curl: `supabase functions invoke option-chain --data '{"ticker":"IBIT"}'`
-- [ ] Verify response shape matches spec
-- [ ] Deploy function: `supabase functions deploy option-chain`
+- [x] Test with curl: `supabase functions invoke option-chain --data '{"ticker":"IBIT"}'`
+- [x] Verify response shape matches spec
+- [x] Deploy function: `supabase functions deploy option-chain`
+- [x] Create `/supabase/functions/option-expirations/index.ts` (additional)
+- [x] Deploy option-expirations function for fetching available dates
 
 ### Phase 3: Math Helpers ✅
 - [x] Create `/src/services/wheelMath.ts`

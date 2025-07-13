@@ -1,0 +1,92 @@
+🧪 [TEST] Starting integrated-analysis test...
+
+📤 [TEST] Sending payload to integrated-analysis...
+Payload summary: {
+  ticker: 'IBIT',
+  portfolioPositions: 2,
+  optionPositions: 3,
+  currentPrice: 67.21
+}
+
+📊 [TEST] Response status: 200
+✅ [TEST] Request successful!
+
+💾 [TEST] Full response saved to: test-integrated-analysis-response-2025-07-12T23-54-45-832Z.json
+
+🔍 [RESPONSE STRUCTURE]:
+=======================
+Top-level keys: [
+  'wheelStrategy',
+  'summary',
+  'recommendation',
+  'technicalFactors',
+  'entryPoints',
+  'exitPoints',
+  'actionPlan',
+  'optionsStrategy'
+]
+
+📊 [WHEEL STRATEGY DATA]:
+- Current Phase: COVERED_CALL
+- Share Count: 1400
+- Positions: 3
+
+📈 [OPTION POSITIONS ANALYSIS]:
+
+Position 1:
+  Strike: $61
+  Type: CALL
+  Expiry: Jul-18-2025
+  Contracts: -1
+  Analysis: This position is currently losing. The current price of $67.21 is above the strike price, increasing the risk of assignment. Consider rolling to a higher strike to capture more premium.
+  Next Action: Roll to a higher strike to reduce assignment risk and capture additional premium.
+
+Position 2:
+  Strike: $62
+  Type: CALL
+  Expiry: Aug-15-2025
+  Contracts: -1
+  Analysis: This position is also losing. With the current price above the strike, assignment risk is high. Rolling to a higher strike could be beneficial.
+  Next Action: Roll to a higher strike to mitigate assignment risk and improve position.
+
+Position 3:
+  Strike: $63
+  Type: CALL
+  Expiry: Aug-15-2025
+  Contracts: -4
+  Analysis: Significant loss with high assignment risk due to the current price being above the strike. Immediate action is required.
+  Next Action: Consider closing or rolling to a higher strike to manage risk and reduce potential losses.
+
+📋 [SUMMARY]:
+{
+  "currentPrice": 67.21,
+  "wheelPhase": "COVERED_CALL",
+  "overallAssessment": "The current option positions are underperforming with high assignment risk. Strategic adjustments are necessary."
+}
+
+💡 [RECOMMENDATIONS]:
+[
+  {
+    "name": "Sell Calls",
+    "value": 7
+  },
+  {
+    "name": "Wait",
+    "value": 2
+  },
+  {
+    "name": "Close Position",
+    "value": 1
+  }
+]
+
+📌 [ACTION PLAN]:
+[
+  "Roll current positions to higher strikes using available prices: 68 or 70, to reduce assignment risk and capture additional premium."
+]
+
+🔍 [POTENTIAL ISSUES]:
+- Contains undefined values: false
+- Contains null values: false
+
+✅ [TEST] Integrated analysis test completed!

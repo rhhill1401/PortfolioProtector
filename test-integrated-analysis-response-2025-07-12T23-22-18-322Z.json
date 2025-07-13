@@ -1,0 +1,91 @@
+{
+  "success": true,
+  "analysis": {
+    "wheelStrategy": {
+      "shareCount": 1400,
+      "currentPhase": "COVERED_CALL",
+      "currentPositions": [
+        {
+          "strike": 61,
+          "expiry": "Jul-18-2025",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 228.32,
+          "currentValue": 635,
+          "profitLoss": -406.68,
+          "analysis": "Losing position with a high assignment risk as the current price is above the strike. Consider rolling to a higher strike to capture more premium.",
+          "nextAction": "Roll to a higher strike to reduce assignment risk and capture additional premium."
+        },
+        {
+          "strike": 62,
+          "expiry": "Aug-15-2025",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 359.32,
+          "currentValue": 674,
+          "profitLoss": -314.68,
+          "analysis": "Losing position with a moderate assignment risk. The current price is above the strike. Consider rolling to a higher strike.",
+          "nextAction": "Roll to a higher strike to reduce assignment risk and capture additional premium."
+        },
+        {
+          "strike": 63,
+          "expiry": "Aug-15-2025",
+          "type": "CALL",
+          "contracts": -4,
+          "premium": 1232.28,
+          "currentValue": 2404,
+          "profitLoss": -1171.72,
+          "analysis": "Losing position with a moderate assignment risk. The current price is above the strike. Consider rolling to a higher strike.",
+          "nextAction": "Roll to a higher strike to reduce assignment risk and capture additional premium."
+        }
+      ]
+    },
+    "summary": {
+      "currentPrice": 67.21,
+      "wheelPhase": "COVERED_CALL",
+      "overallAssessment": "The current option positions are losing due to the stock price being above the strike prices, increasing the risk of assignment. Rolling to higher strikes is recommended."
+    },
+    "recommendation": [
+      {
+        "name": "Sell Calls",
+        "value": 7
+      },
+      {
+        "name": "Wait",
+        "value": 2
+      },
+      {
+        "name": "Close Position",
+        "value": 1
+      }
+    ],
+    "technicalFactors": [
+      {
+        "factor": "Strike Selection",
+        "value": "USE ONLY PROVIDED PRICES",
+        "interpretation": "Calculate percentage out-of-the-money",
+        "impact": "Assess risk/reward",
+        "score": "8"
+      }
+    ],
+    "entryPoints": [
+      {
+        "zone": "Covered Call Strike",
+        "price": "SELECT FROM PROVIDED RESISTANCE/SUPPORT LEVELS",
+        "timing": "45 days to expiration",
+        "rationale": "Select a strike price above current resistance levels to maximize premium while minimizing assignment risk."
+      }
+    ],
+    "exitPoints": [
+      {
+        "target": "50% Profit Target",
+        "gain": "50% of max profit",
+        "timeframe": "20-25 days"
+      }
+    ],
+    "actionPlan": [
+      "Roll current call positions to higher strikes using available strike prices (68, 70, 65) to reduce assignment risk and capture additional premium."
+    ],
+    "optionsStrategy": "Implement a covered call strategy by rolling existing positions to higher strikes, utilizing technical indicators to select optimal entry points."
+  }
+}

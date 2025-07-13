@@ -121,6 +121,9 @@ Deno.serve(async (req) => {
 
       const option = data.results[0];
       
+      // Log raw response for debugging
+      console.log('Raw Polygon response:', JSON.stringify(option, null, 2));
+      
       // Calculate days to expiration
       const today = new Date();
       const expiryDate = new Date(option.details.expiration_date);
@@ -131,14 +134,17 @@ Deno.serve(async (req) => {
       let bid = null;
       let ask = null;
       
+      // Note: Polygon snapshot API doesn't include bid/ask in starter plan
+      // Real-time quotes require Options Starter ($29/mo) or higher
       if (option.last_quote?.ask && option.last_quote?.bid) {
-        // Normalize from Polygon format (integer × 1e4)
+        // This would work with higher tier plans
         ask = option.last_quote.ask / 10000;
         bid = option.last_quote.bid / 10000;
         mid = (ask + bid) / 2;
       } else if (option.day?.close) {
-        // Fallback to day's close
+        // Use day's close as mid price (starter plan limitation)
         mid = option.day.close;
+        console.log(`Using day close as mid: ${mid} (bid/ask requires higher tier Polygon plan)`);
       }
       
       // Build response
@@ -162,7 +168,10 @@ Deno.serve(async (req) => {
           dayVolume: option.day?.volume || null,
           lastUpdated: option.last_quote?.last_updated || Date.now()
         },
-        ts: Date.now()
+        ts: Date.now(),
+        note: bid === null && ask === null ? 
+          "Bid/Ask unavailable - Polygon starter plan limitation. Using day's close as mid price." : 
+          undefined
       };
       
       const successResponse = new Response(

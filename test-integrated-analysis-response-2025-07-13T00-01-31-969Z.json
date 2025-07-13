@@ -1,0 +1,91 @@
+{
+  "success": true,
+  "analysis": {
+    "wheelStrategy": {
+      "shareCount": 1400,
+      "currentPhase": "COVERED_CALL",
+      "currentPositions": [
+        {
+          "strike": 61,
+          "expiry": "Jul-18-2025",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 228.32,
+          "currentValue": 635,
+          "profitLoss": -406.68,
+          "analysis": "Losing position with high assignment risk as current price $67.21 is above strike $61. Consider rolling to a higher strike to capture more premium.",
+          "nextAction": "Roll to a higher strike, such as $68, to reduce assignment risk and collect additional premium."
+        },
+        {
+          "strike": 62,
+          "expiry": "Aug-15-2025",
+          "type": "CALL",
+          "contracts": -1,
+          "premium": 359.32,
+          "currentValue": 674,
+          "profitLoss": -314.68,
+          "analysis": "Losing position with high assignment risk as current price $67.21 is above strike $62. Consider rolling to a higher strike.",
+          "nextAction": "Roll to a higher strike, such as $70, to reduce assignment risk and collect additional premium."
+        },
+        {
+          "strike": 63,
+          "expiry": "Aug-15-2025",
+          "type": "CALL",
+          "contracts": -4,
+          "premium": 1232.28,
+          "currentValue": 2404,
+          "profitLoss": -4686.88,
+          "analysis": "Losing position with high assignment risk as current price $67.21 is above strike $63. Consider rolling to a higher strike.",
+          "nextAction": "Roll to a higher strike, such as $70, to reduce assignment risk and collect additional premium."
+        }
+      ]
+    },
+    "summary": {
+      "currentPrice": 67.21,
+      "wheelPhase": "COVERED_CALL",
+      "overallAssessment": "All current option positions are losing with high assignment risk due to current price being above strike prices."
+    },
+    "recommendation": [
+      {
+        "name": "Sell Calls",
+        "value": 7
+      },
+      {
+        "name": "Wait",
+        "value": 2
+      },
+      {
+        "name": "Close Position",
+        "value": 1
+      }
+    ],
+    "technicalFactors": [
+      {
+        "factor": "Strike Selection",
+        "value": "USE ONLY PROVIDED PRICES",
+        "interpretation": "Current price $67.21 is above all strike prices, indicating high assignment risk.",
+        "impact": "High risk of assignment; consider rolling to higher strikes.",
+        "score": "8"
+      }
+    ],
+    "entryPoints": [
+      {
+        "zone": "Covered Call Strike",
+        "price": "SELECT FROM PROVIDED RESISTANCE/SUPPORT LEVELS",
+        "timing": "45 days to expiration",
+        "rationale": "Select higher strikes like $68 or $70 to reduce assignment risk and align with bullish technical indicators."
+      }
+    ],
+    "exitPoints": [
+      {
+        "target": "50% Profit Target",
+        "gain": "50% of max profit",
+        "timeframe": "20-25 days"
+      }
+    ],
+    "actionPlan": [
+      "Roll current positions to higher strikes such as $68 or $70 to reduce assignment risk and collect additional premium."
+    ],
+    "optionsStrategy": "Roll covered calls to higher strikes to align with bullish trend and reduce assignment risk."
+  }
+}

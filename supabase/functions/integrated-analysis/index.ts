@@ -133,17 +133,59 @@ Deno.serve(async (req) => {
   const shareContracts = Math.floor(currentShares / 100);
   
   // 📊 EXTRACT ACTUAL OPTION POSITIONS from portfolio metadata
-  const optionPositions = portfolio?.metadata?.optionPositions || [];
-  const currentOptionPositions = optionPositions.filter((opt: any) => 
-    opt.symbol && opt.symbol.startsWith(ticker));
+  
+  /** ───────── OPTION METRICS PRE-COMPUTE ───────── */
+  interface CalculatedOption extends Record<string, unknown> {
+    profitLoss: number;
+    cycleReturn: number;      // % of premium captured (optional)
+  }
+  
+  function calcOptionMetrics(opt: any): CalculatedOption {
+    const prem = Number(opt.premiumCollected) || 0;
+    const cur  = Number(opt.currentValue)     || 0;
+    const cnt  = Math.abs(Number(opt.contracts) || 1);
+    const pl   = (prem - cur) * cnt;                   // positive = profit on a short option
+    const ret  = prem > 0 ? (pl / prem) * 100 : 0;
+    return { ...opt, profitLoss: pl, cycleReturn: Number(ret.toFixed(2)) };
+  }
+  
+  const optionPositions = (portfolio?.metadata?.optionPositions || []).map(calcOptionMetrics);
+  const currentOptionPositions =
+    optionPositions.filter((opt: any) => opt.symbol?.startsWith(ticker));
+  
+  // Calculate total premium collected across ALL positions
+  // Note: premiumCollected is already the total for that position, not per contract
+  const totalPremiumCollected = currentOptionPositions.reduce((total: number, opt: any) => {
+    const prem = Number(opt.premiumCollected) || 0;
+    return total + prem;
+  }, 0);
+  
+  // Count total contracts
+  const totalContracts = currentOptionPositions.reduce((total: number, opt: any) => {
+    return total + Math.abs(Number(opt.contracts) || 0);
+  }, 0);
   
   console.log('🔍 [WHEEL ANALYSIS] Portfolio analysis:', {
     ticker,
     hasPosition,
+    totalPositions: currentOptionPositions.length,
+    totalContracts: totalContracts,
+    totalPremiumCollected: totalPremiumCollected.toFixed(2),
     currentShares,
     optionPositionsFound: currentOptionPositions.length,
     allOptionPositions: optionPositions.length
   });
+  
+  // Log all option positions for debugging
+  console.log('📊 [ALL OPTION POSITIONS] Raw data:', 
+    optionPositions.map((opt: any) => ({
+      symbol: opt.symbol,
+      strike: opt.strike,
+      contracts: opt.contracts,
+      premium: opt.premiumCollected,
+      profitLoss: opt.profitLoss
+    }))
+  );
 
   // 🚨 CRITICAL DEBUG: Log exact portfolio structure received
   console.log('🚨 [DEBUG] EXACT PORTFOLIO STRUCTURE RECEIVED:', JSON.stringify({
@@ -216,6 +258,7 @@ PORTFOLIO DATA:
 • Share Position: ${hasPosition ? `${currentShares} shares @ $${costBasis.toFixed(2)}` : 'No shares owned'}
 • Wheel Phase: ${wheelPhase}
 • Portfolio Value: $${portfolio?.totalValue?.toLocaleString() || 'Unknown'}
+• Total Premium Collected: $${totalPremiumCollected.toFixed(2)}
 
 ${currentOptionPositions.length > 0 ? 
 `UPLOADED OPTION POSITIONS (${currentOptionPositions.length} positions):

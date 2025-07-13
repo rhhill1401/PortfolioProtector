@@ -1,0 +1,86 @@
+🧪 [TEST] Starting portfolio-vision edge function test...
+
+📸 [TEST] Reading portfolio image...
+✅ [TEST] Image loaded (571KB)
+
+🚀 [TEST] Calling portfolio-vision edge function...
+📊 [TEST] Response status: 200
+
+🔍 [TEST] DETAILED RESPONSE ANALYSIS:
+=====================================
+
+📋 [SUCCESS]: true
+
+📊 [PORTFOLIO DETECTED]: true
+🏦 [BROKERAGE TYPE]: Unknown
+💰 [TOTAL VALUE]: 94094
+🎯 [CONFIDENCE]: high
+📝 [NOTES]: All positions clearly visible
+
+📈 [STOCK POSITIONS]:
+   1. IBIT: 1400 shares @ $67.21 = $94094
+   2. NVDA: 200 shares @ $164.92 = $32984
+
+📊 [OPTION POSITIONS]:
+   1. IBIT $61 CALL Jul-18-2025
+       Contracts: -1 (SHORT)
+       Premium: $228.32 | Current: $635
+       P&L: $-406.68 | DTE: 6
+
+   2. IBIT $62 CALL Aug-15-2025
+       Contracts: -1 (SHORT)
+       Premium: $359.32 | Current: $674
+       P&L: $-314.68 | DTE: 34
+
+   3. IBIT $63 CALL Aug-15-2025
+       Contracts: -4 (SHORT)
+       Premium: $1232.28 | Current: $2404
+       P&L: $-1171.72 | DTE: 34
+
+   4. IBIT $70 CALL Dec-17-2027
+       Contracts: -2 (SHORT)
+       Premium: $3948.58 | Current: $4386
+       P&L: $-437.42 | DTE: 888
+
+   5. IBIT $80 CALL Dec-17-2027
+       Contracts: -5 (SHORT)
+       Premium: $8646.45 | Current: $9400
+       P&L: $-753.55 | DTE: 888
+
+   6. IBIT $90 CALL Dec-17-2027
+       Contracts: -1 (SHORT)
+       Premium: $1804.32 | Current: $1610
+       P&L: $194.32 | DTE: 888
+
+   7. NVDA $190 CALL Dec-17-2027
+       Contracts: -1 (SHORT)
+       Premium: $3439.32 | Current: $3756
+       P&L: $-316.68 | DTE: 888
+
+   8. NVDA $200 CALL Dec-17-2027
+       Contracts: -1 (SHORT)
+       Premium: $3404.32 | Current: $3440
+       P&L: $-35.68 | DTE: 888
+
+
+🎯 [EXPECTED VS ACTUAL ANALYSIS]:
+================================
+
+From the image, we should see:
+✓ IBIT stock: 1,400 shares @ $67.21
+✓ IBIT 61 Call (Jul-19-2025): -1 contract
+✓ IBIT 62 Call (Aug-15-2025): -1 contract
+✓ IBIT 63 Call (Aug-15-2025): -4 contracts
+✓ IBIT 70 Call (Dec-17-2027): -2 contracts
+✓ IBIT 80 Call (Dec-17-2027): -5 contracts
+✓ IBIT 90 Call (Dec-17-2027): -1 contract
+✓ NVDA stock: 200 shares @ $164.92
+✓ NVDA 190 Call (Dec-17-2027): -1 contract
+✓ NVDA 200 Call (Dec-17-2027): -1 contract
+
+Extracted: 2 stocks, 8 options
+Expected: 2 stocks, 7 options
+⚠️  [PARTIAL] Some positions may be missing
+
+✅ [TEST] Portfolio vision test completed!
+

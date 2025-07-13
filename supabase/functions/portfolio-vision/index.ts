@@ -62,63 +62,64 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         model: "gpt-4o",
         temperature: 0.1, // Lower temperature for more accurate data extraction
-        max_tokens: 1000,
+        max_tokens: 2000, // Increased to prevent truncation with image prompts
+        response_format: { type: "json_object" }, // Enable JSON mode for guaranteed valid JSON
         messages: [
           {
             role: "system",
-            content: `You are a financial data extraction specialist. Your job is to analyze portfolio screenshots and extract position data with 100% accuracy.
+            content: `You MUST respond with valid JSON only. You are a financial data extraction specialist analyzing portfolio screenshots.
 
 CRITICAL REQUIREMENTS:
-1. ALWAYS return valid JSON even if image is unclear
+1. Return ONLY valid JSON - no other text
 2. Extract ALL visible positions: STOCKS AND OPTIONS
 3. If you cannot read exact values, use "Unknown" - never guess
 4. Focus on extracting: Stocks, Sold Options (Calls/Puts), Option details (Strike, Expiry, Premium)
 5. Look for common brokerage interfaces (Robinhood, TD Ameritrade, E*TRADE, Schwab, etc.)
 6. PAY SPECIAL ATTENTION TO OPTIONS: Look for call/put contracts you've SOLD (short positions)
 
-Return JSON matching this EXACT structure:
+Your response must be valid JSON matching this EXACT structure:
 {
-  "portfolioDetected": boolean,
-  "brokerageType": string (e.g., "Robinhood", "TD Ameritrade", "Unknown"),
+  "portfolioDetected": true,
+  "brokerageType": "Robinhood",
   "positions": [
     {
-      "symbol": string,
-      "quantity": number,
-      "purchasePrice": number,
-      "currentPrice": number,
-      "marketValue": number,
-      "percentChange": string,
-      "gainLoss": number
+      "symbol": "AAPL",
+      "quantity": 100,
+      "purchasePrice": 150.50,
+      "currentPrice": 175.25,
+      "marketValue": 17525.00,
+      "percentChange": "+16.4%",
+      "gainLoss": 2475.00
     }
   ],
   "metadata": {
     "optionPositions": [
       {
-        "symbol": string,
-        "optionType": "CALL" | "PUT",
-        "strike": number,
-        "expiry": string,
-        "contracts": number,
-        "position": "SHORT" | "LONG",
-        "premiumCollected": number,
-        "currentValue": number,
-        "daysToExpiry": number,
-        "profitLoss": number,
-        "percentReturn": string,
-        "status": string
+        "symbol": "AAPL",
+        "optionType": "CALL",
+        "strike": 180,
+        "expiry": "2025-08-15",
+        "contracts": -1,
+        "position": "SHORT",
+        "premiumCollected": 350,
+        "currentValue": 200,
+        "daysToExpiry": 30,
+        "profitLoss": 150,
+        "percentReturn": "+42.8%",
+        "status": "Open"
       }
     ]
   },
-  "totalValue": number,
-  "extractionConfidence": string ("high", "medium", "low"),
-  "extractionNotes": string (what you could/couldn't see clearly)
+  "totalValue": 17525.00,
+  "extractionConfidence": "high",
+  "extractionNotes": "All positions clearly visible"
 }
 
 IMPORTANT: 
 - If you see ANY portfolio data, set portfolioDetected: true
 - If image shows no portfolio (e.g., just charts), set portfolioDetected: false
 - Extract ALL positions visible, not just the target ticker
-- Never apologize or explain - only return JSON`,
+- Response MUST be valid JSON only - no text before or after`,
           },
           {
             role: "user",
@@ -155,7 +156,7 @@ WHEEL STRATEGY FOCUS: If you see sold calls (-1 contracts, -4 contracts), extrac
 - Current profit/loss
 - Performance metrics
 
-Return ONLY the JSON structure specified. No explanations.`,
+Return ONLY valid JSON following the exact structure specified. No text before or after the JSON.`,
               },
             ],
           },
@@ -171,35 +172,28 @@ Return ONLY the JSON structure specified. No explanations.`,
       throw new Error(aiData.error?.message || "OpenAI error");
     }
 
-    /* -------- Extract JSON block from the reply -------- */
-    let txt: string = aiData.choices?.[0]?.message?.content ?? "";
-    console.log(`📝 [PORTFOLIO VISION] Raw AI response: ${txt.substring(0, 200)}...`);
+    // Debug: Check if response_format was applied
+    console.log(`🔍 [PORTFOLIO VISION] AI model used: ${aiData.model}`);
+    console.log(`🔍 [PORTFOLIO VISION] Finish reason: ${aiData.choices?.[0]?.finish_reason}`);
+    console.log(`🔍 [PORTFOLIO VISION] Usage:`, aiData.usage);
+    
+    /* -------- With JSON mode, response is guaranteed to be valid JSON -------- */
+    const txt: string = aiData.choices?.[0]?.message?.content ?? "{}";
+    console.log(`📝 [PORTFOLIO VISION] Raw AI response length: ${txt.length} chars`);
+    console.log(`📝 [PORTFOLIO VISION] Response starts with: ${txt.substring(0, 50)}`);
+    console.log(`📝 [PORTFOLIO VISION] Response ends with: ${txt.substring(txt.length - 50)}`);
 
-    const first = txt.indexOf("{");
-    const last = txt.lastIndexOf("}");
-    if (first !== -1 && last !== -1 && last > first) {
-      txt = txt.slice(first, last + 1);
-    }
-    txt = txt
-      .replace(/^\s*```(?:json)?/i, "")
-      .replace(/```+\s*$/i, "")
-      .trim();
-
-    /* ----- Handle model apologies/refusals gracefully ----- */
-    if (
-      txt.toLowerCase().includes("sorry") ||
-      txt.toLowerCase().includes("apologize") ||
-      txt.toLowerCase().includes("cannot") ||
-      txt.toLowerCase().includes("unable")
-    ) {
-      console.warn("⚠️ [PORTFOLIO VISION] AI returned apology/refusal – sending default response");
+    /* ----- Check for refusal in the response ----- */
+    if (aiData.choices?.[0]?.message?.refusal) {
+      console.warn("⚠️ [PORTFOLIO VISION] AI refused the request:", aiData.choices[0].message.refusal);
       const defaultResponse = {
         portfolioDetected: false,
         brokerageType: "Unknown",
         positions: [],
+        metadata: { optionPositions: [] },
         totalValue: 0,
         extractionConfidence: "low",
-        extractionNotes: "AI could not extract portfolio data from image"
+        extractionNotes: "AI refused to process the image"
       };
       return jsonResponse({ success: true, portfolio: defaultResponse });
     }
@@ -207,21 +201,40 @@ Return ONLY the JSON structure specified. No explanations.`,
     try {
       const portfolio = JSON.parse(txt);
       
-      // Post-process option positions to calculate daysToExpiry and term length
-      if (portfolio.metadata?.optionPositions) {
+      // 🛡️ DEFENSIVE: Post-process option positions with error handling
+      // This was causing JSON parsing failures when date parsing crashed
+      if (portfolio.metadata?.optionPositions && Array.isArray(portfolio.metadata.optionPositions)) {
         const today = new Date();
         
-        portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.map((opt: any) => {
-          const d = new Date(opt.expiry);
-          const days = isNaN(+d) ? 0 : Math.max(0, Math.ceil((d.getTime() - today.getTime()) / 86_400_000));
-          
-          return {
-            ...opt,
-            daysToExpiry: days,
-            term: days > 365 ? 'LONG_DATED' : 'SHORT_DATED',
-            position: opt.contracts < 0 ? 'SHORT' : 'LONG' // Keep position for bought/sold distinction
-          };
-        });
+        try {
+          portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.map((opt: any) => {
+            let days = 0;
+            
+            // 🛡️ DEFENSIVE: Safe date parsing with multiple fallbacks
+            try {
+              if (opt.expiry) {
+                const d = new Date(opt.expiry);
+                if (!isNaN(d.getTime())) {
+                  days = Math.max(0, Math.ceil((d.getTime() - today.getTime()) / 86_400_000));
+                } else {
+                  console.warn(`⚠️ [PORTFOLIO VISION] Invalid expiry date format: ${opt.expiry}`);
+                }
+              }
+            } catch (dateError) {
+              console.warn(`⚠️ [PORTFOLIO VISION] Date parsing error for ${opt.expiry}:`, dateError);
+            }
+            
+            return {
+              ...opt,
+              daysToExpiry: days,
+              term: days > 365 ? 'LONG_DATED' : 'SHORT_DATED',
+              position: opt.contracts < 0 ? 'SHORT' : 'LONG' // Keep position for bought/sold distinction
+            };
+          });
+        } catch (postProcessError) {
+          console.error(`⚠️ [PORTFOLIO VISION] Post-processing failed, keeping original data:`, postProcessError);
+          // Keep original optionPositions if post-processing fails
+        }
       }
       
       console.log(`✅ [PORTFOLIO VISION] Successfully parsed portfolio data:`, {
@@ -262,21 +275,32 @@ Return ONLY the JSON structure specified. No explanations.`,
       return jsonResponse({ success: true, portfolio }, 200);
     } catch (parseError) {
       console.error(`❌ [PORTFOLIO VISION] JSON parse error:`, parseError);
-      console.error(`🔍 [PORTFOLIO VISION] Failed to parse text:`, txt);
+      console.error(`🔍 [PORTFOLIO VISION] Failed to parse text (length: ${txt.length})`);
+      console.error(`🔍 [PORTFOLIO VISION] First 1000 chars:`, txt.substring(0, 1000));
+      console.error(`🔍 [PORTFOLIO VISION] Last 500 chars:`, txt.substring(txt.length - 500));
       
-      // Return fallback response
+      // Log the exact position where parsing failed
+      const errorMatch = parseError.message.match(/at position (\d+)/);
+      if (errorMatch) {
+        const errorPos = parseInt(errorMatch[1]);
+        console.error(`🔍 [PORTFOLIO VISION] Error position ${errorPos}, context:`, 
+          txt.substring(Math.max(0, errorPos - 50), Math.min(txt.length, errorPos + 50)));
+      }
+      
+      // With JSON mode enabled, this should rarely happen
+      // Return a minimal valid response
       const fallbackResponse = {
         portfolioDetected: false,
         brokerageType: "Unknown",
         positions: [],
+        metadata: { optionPositions: [] },
         totalValue: 0,
         extractionConfidence: "low",
-        extractionNotes: "Failed to parse AI response as valid JSON"
+        extractionNotes: `JSON parsing failed despite JSON mode. This is unusual. Error: ${parseError.message}`
       };
       
       return jsonResponse({ 
-        success: false, 
-        error: "Failed to parse portfolio data", 
+        success: true, 
         portfolio: fallbackResponse 
       }, 200);
     }

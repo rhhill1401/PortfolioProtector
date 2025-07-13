@@ -1,5 +1,7 @@
 # PortfolioProtector Current Application State
 
+Last Updated: July 13, 2025
+
 ## Overview
 PortfolioProtector is a React + TypeScript application for real-time market data and AI-powered investment analysis, specializing in the Wheel Strategy for options trading.
 
@@ -55,33 +57,41 @@ User Input → File Upload → AI Processing → Edge Functions → Analysis Dis
 
 ## Recent Bug Fixes ✅
 
-### AI Invented Prices Error
-**Problem**: Validator was rejecting legitimate rounded numbers
-**Solution**: Disabled overly aggressive price validation
-**Result**: AI can now reference portfolio values naturally
+### Portfolio Vision JSON Parsing (July 2025)
+**Problem**: AI response failing with "Failed to parse AI response as valid JSON"
+**Solution**: Implemented OpenAI JSON mode with response_format: { type: "json_object" }
+**Result**: All 8 option positions now extract correctly
 
-### Type Safety Issues
-**Problem**: Missing keyLevels in TypeScript interface
-**Solution**: Updated ChartAnalysisResult interface
-**Result**: Proper type checking for chart analysis
+### Premium Calculation Display (July 2025)
+**Problem**: Frontend multiplying premium by 100, showing incorrect totals
+**Solution**: Removed multiplication since premiums are already total per position
+**Result**: Correctly shows $16,219 for 14 contracts
+
+### nextCycleReturn Undefined Variable (July 2025)
+**Problem**: ReferenceError crashing Performance tab
+**Solution**: Moved variable declarations inside IIFE scope
+**Result**: Performance tab loads without errors
+
+### Number Display Formatting (July 2025)
+**Problem**: Showing decimals like -3767.7499999964
+**Solution**: Added Math.round() to all dollar displays
+**Result**: Clean whole number displays throughout
 
 ## Known Issues & Limitations
 
+### Current Bugs 🐛
+1. **P&L Calculation Incorrect** - Formula needs verification against brokerage
+2. **AI Response Truncation** - Only showing 3 of 6 IBIT positions in response
+3. **Option Greeks Missing** - Need to fetch from Polygon after portfolio upload
+
 ### UI/UX
 1. Single column layout in performance tab (needs two columns)
-2. Premium display shows per-share price instead of total collected
-3. Gray banner spacing issue in strategic investment section
-4. Missing total premium collected summary
-
-### Data Display
-1. Performance tab shows basic info, needs enhancement
-2. No options Greeks visualization
-3. No aggregate wheel strategy metrics
+2. Gray banner spacing issue in strategic investment section
 
 ### Technical Debt
 1. Some TypeScript `any` types need proper typing
 2. Component re-rendering could be optimized
-3. Mock data still present in some areas
+3. OpenAI quota errors need better handling
 
 ## Environment Configuration
 
@@ -94,10 +104,12 @@ VITE_SUPABASE_FN_URL=your_functions_url
 ```
 
 ### Edge Functions Deployed
-- `integrated-analysis` - Main analysis endpoint
-- `chart-vision` - Chart pattern analysis
-- `portfolio-vision` - Portfolio extraction from images
-- `stock-analysis` - Legacy endpoint
+- `integrated-analysis` - Main analysis endpoint with wheel strategy
+- `chart-vision` - Chart pattern analysis  
+- `portfolio-vision` - Portfolio extraction from images (fixed JSON parsing)
+- `option-expirations` - Fetch available expiration dates from Polygon
+- `option-chain` - Get full option chain for a ticker
+- `option-quote` - Get specific option quote with Greeks
 
 ## Technology Stack
 - **Frontend**: React 19, TypeScript, Vite

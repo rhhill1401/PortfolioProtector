@@ -212,6 +212,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			 *       warning, so nothing crashes.)
 			 */
 			const parseExpiry = (dateStr: string): string => {
+				// Handle undefined or null
+				if (!dateStr) {
+					console.warn('⚠️ parseExpiry: received undefined/null date');
+					return '';
+				}
 				// Case 1 ─ already correct
 				if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
 
@@ -353,7 +358,17 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				...e.detail,
 				wheelStrategy: e.detail.wheelAnalysis || e.detail.wheelStrategy
 			};
-			setAnalysisData(normalizedData); // fills tabs
+			
+			// Add error handling before setting state
+			try {
+				console.log('📊 [STOCK ANALYSIS] About to set analysis data:', normalizedData);
+				setAnalysisData(normalizedData); // fills tabs
+				console.log('✅ [STOCK ANALYSIS] Analysis data set successfully');
+			} catch (error) {
+				console.error('❌ [STOCK ANALYSIS] Error setting analysis data:', error);
+				console.error('Error stack:', error.stack);
+				console.error('Normalized data that caused error:', normalizedData);
+			}
 		};
 		window.addEventListener('analysis-ready', handler as EventListener);
 		return () =>
@@ -616,11 +631,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<div className='mt-3 pt-3 border-t border-blue-200'>
 											<p className='text-xs text-gray-600'>Total Premium Collected</p>
 											<p className='text-xl font-bold text-gray-900'>
-												${analysisData.wheelStrategy.currentPositions?.reduce((total, pos) => {
-													// Use premiumCollected if premium is not available
+												${Math.round(analysisData.wheelStrategy.currentPositions?.reduce((total, pos) => {
+													// Premium values are already total collected per position, not per share
 													const premiumValue = pos.premium || pos.premiumCollected || 0;
-													return total + (premiumValue * 100 * Math.abs(pos.contracts));
-												}, 0).toFixed(2) || '0.00'}
+													return total + premiumValue;
+												}, 0)) || '0'}
 											</p>
 										</div>
 									</div>
@@ -800,7 +815,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<div>
 																	<span className="text-gray-600">P&L: </span>
 																	<span className={`font-semibold ${(position.profitLoss || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-																		${position.profitLoss || 0}
+																		${Math.round(position.profitLoss || 0)}
 																	</span>
 																</div>
 															</div>
@@ -829,28 +844,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 														? calculateAggregateMetrics(positions, wheelQuotes)
 														: null;
 													
-													// For new position suggestion, use option chain data
-													const shareCount = analysisData.wheelStrategy?.shareCount || 100;
-													const currentPrice = displayData?.summary?.currentPrice || priceInfo.price || 0;
-													
-													// Calculate potential return for next cycle (from option chain)
-													const nextCycleReturn = optionChainData?.success && optionChainData.chain && currentPrice > 0
-														? grossYield(
-																cycleCredit(optionChainData.chain.mid),
-																shareCount,
-																currentPrice,
-																optionChainData.chain.dte
-															)
-														: null;
-													
-													// Calculate assignment probability for next cycle
-													const nextCycleAssignmentProb = currentPrice && optionChainData?.chain
-														? estimateAssignmentProb(
-															currentPrice,
-															optionChainData.chain.strike,
-															optionChainData.chain.dte
-														)
-														: null;
+													// Variables for next cycle calculations moved to where they're used
 													
 													// Use aggregate metrics if available
 													const totalPremiumCollected = metrics?.totalPremiumCollected || 0;
@@ -864,7 +858,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 															<div className="flex justify-between items-baseline border-b pb-2">
 																<span className="text-sm text-gray-600">Total Premium Collected</span>
 																<div className="text-right">
-																	<span className="text-lg font-bold">${totalPremiumCollected.toFixed(2)}</span>
+																	<span className="text-lg font-bold">${Math.round(totalPremiumCollected)}</span>
 																	<span className="text-xs text-green-600 ml-1">+8.02%</span>
 																</div>
 															</div>
@@ -875,7 +869,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<div className="text-right">
 																	{unrealizedPL !== null ? (
 																		<>
-																			<span className="text-lg font-bold">{unrealizedPL >= 0 ? '+' : ''}${Math.abs(unrealizedPL).toFixed(2)}</span>
+																			<span className="text-lg font-bold">{unrealizedPL >= 0 ? '+' : ''}${Math.round(Math.abs(unrealizedPL))}</span>
 																			{totalPremiumCollected > 0 && (
 																				<span className={`text-xs ml-1 ${unrealizedPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
 																					{unrealizedPL >= 0 ? '+' : ''}{((unrealizedPL / totalPremiumCollected) * 100).toFixed(1)}%
@@ -894,7 +888,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<div className="text-right">
 																	{costToClosePosition !== null ? (
 																		<>
-																			<span className="text-lg font-bold">${costToClosePosition.toFixed(2)}</span>
+																			<span className="text-lg font-bold">${Math.round(costToClosePosition)}</span>
 																			{totalPremiumCollected > 0 && (
 																				<span className="text-xs text-gray-600 ml-1">
 																					{((costToClosePosition / totalPremiumCollected) * 100).toFixed(0)}% of collected
@@ -945,6 +939,31 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											</CardHeader>
 											<CardContent>
 												<div className="space-y-3">
+													{(() => {
+														// Calculate these values inside the card where they're used
+														const shareCount = analysisData.wheelStrategy?.shareCount || 100;
+														const currentPrice = displayData?.summary?.currentPrice || priceInfo.price || 0;
+														
+														// Calculate potential return for next cycle (from option chain)
+														const nextCycleReturn = optionChainData?.success && optionChainData.chain && currentPrice > 0
+															? grossYield(
+																	cycleCredit(optionChainData.chain.mid),
+																	shareCount,
+																	currentPrice,
+																	optionChainData.chain.dte
+																)
+															: null;
+														
+														// Calculate assignment probability for next cycle
+														const nextCycleAssignmentProb = currentPrice && optionChainData?.chain
+															? estimateAssignmentProb(
+																currentPrice,
+																optionChainData.chain.strike,
+																optionChainData.chain.dte
+															)
+															: null;
+														
+														return (<>
 													<div className="flex justify-between items-baseline">
 														<span className="text-sm text-gray-600">Contract</span>
 														<span className="font-mono text-sm">
@@ -981,6 +1000,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 															{nextCycleAssignmentProb ? `${(nextCycleAssignmentProb * 100).toFixed(0)}%` : 'N/A'}
 														</span>
 													</div>
+														</>);
+													})()}
 												</div>
 											</CardContent>
 										</Card>

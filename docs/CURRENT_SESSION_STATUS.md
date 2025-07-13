@@ -64,37 +64,44 @@
 - Currently filtering for specific months: Jan 2026, Dec 2025, Nov 2025, Sep 2025
 - Using $61 strike as initial test case
 
-## Latest Session Progress (July 13, 2025)
+## Latest Session Progress (July 13, 2025) ✅ COMPLETED
 
-### Premium Calculation Fix ✅
-- **Issue**: User reported 14 covered call contracts but only seeing partial data
-- **Root Cause**: 
-  - Confusion between POSITIONS (6) vs CONTRACTS (14)
-  - Frontend multiplying premium by 100 unnecessarily
-  - AI response truncating to only 3 positions
-- **Fix Applied**:
-  - Pre-computed P&L metrics on backend
-  - Fixed frontend premium calculation
-  - Added total tracking for all positions
-- **Result**: Correctly shows $16,219.27 total premium (matches user expectation)
+### Phase 3.8: Wheel P&L Patch Implementation ✅ COMPLETED
+- **Problem**: P&L only showed mark-to-market losses, not wheel strategy profits
+- **Solution**: Implemented dual P&L metrics:
+  - `optionMTM`: Traditional mark-to-market P&L (paper gains/losses)
+  - `wheelNet`: Wheel strategy net profit (real profit if assigned)
+- **Backend Changes**:
+  - Updated `calcOptionMetrics` function in integrated-analysis
+  - Extract cost basis from portfolio positions ($59.09 for IBIT)
+  - Added proper TypeScript types and cleaned up code
+- **Frontend Changes**:
+  - Display wheelNet as large bold Strategy P&L (green/red)
+  - Show optionMTM as small gray MTM text
+  - Maintained existing card layout
+- **Results**: $63 CALL example shows optionMTM: -$1,172 vs wheelNet: +$2,796
+- **Testing**: End-to-end verified with real portfolio data
+- **Status**: Code reviewed, deployed, and documented
 
-### Current Status
-- Portfolio-vision correctly extracts all 6 IBIT positions (14 contracts)
-- Integrated-analysis receives all data correctly
-- Frontend calculation fixed to show correct premium totals
-- Premium calculation is DYNAMIC from uploaded positions (NOT hardcoded)
-- Total premium shows $16,219 (matches user expectation)
-- All dollar amounts now display as whole numbers (no decimals)
-- Documentation created in `/docs/OPTION_PREMIUM_FIX.md`
+### Previous Fixes Completed ✅
+- **Premium Calculation**: Fixed frontend multiplying by 100 unnecessarily
+- **AI Response Truncation**: Fixed with increased tokens and JSON mode  
+- **Portfolio Vision**: All 6 IBIT positions (14 contracts) extracted correctly
+- **Number Formatting**: All displays show whole numbers (no decimals)
+- **Total Premium**: Shows $16,219 dynamically from uploaded positions
 
-### Current Work - Phase 3.8: Wheel P&L Patch
-- Implementing two P&L metrics: optionMTM (mark-to-market) and wheelNet (strategy profit)
-- Using real cost basis from portfolio positions ($59 for IBIT)
-- Frontend will display wheelNet prominently, optionMTM as gray text
-- Testing with end-to-end flow using real portfolio image
+### Session Summary
+- ✅ All critical P&L calculation bugs resolved
+- ✅ Wheel strategy metrics working correctly
+- ✅ Backend and frontend integration complete
+- ✅ Code review standards met
+- ✅ Documentation updated and comprehensive
+- ✅ Ready for Phase 3.9
 
-## Next Session Instructions
-1. Complete Phase 3.8 wheel P&L implementation
-2. Test end-to-end flow with real data
-3. Verify UI displays correct metrics
-4. Run code review hook after completion
+## Next Session Instructions (Tomorrow)
+1. **Start Phase 3.9**: Fetch Option Greeks from Polygon
+   - Extract all option positions after portfolio upload
+   - Call Polygon API to fetch current Greeks (delta, gamma, theta, vega, IV)
+   - Store Greeks data for wheel strategy recommendations
+2. **Continue to Phase 4**: Fix Wheel Strategy Metrics display
+3. **Goal**: Complete core wheel strategy functionality with real-time data

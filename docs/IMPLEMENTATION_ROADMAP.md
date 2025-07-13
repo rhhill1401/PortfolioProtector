@@ -1,7 +1,7 @@
 # PortfolioProtector Implementation Roadmap
 
 Last Updated: July 13, 2025
-Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
+Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
 
 ## Current Bugs & Issues 🐛
 
@@ -10,9 +10,9 @@ Status: Phase 3.6 Completed, Phase 3.7 Current (P&L Bug Fix)
 - [x] **Portfolio Vision Parsing Failing** - AI response JSON parsing fails ✅ FIXED with JSON mode
 - [x] **Premium Calculation Wrong** - Was multiplying by 100 unnecessarily ✅ FIXED  
 - [x] **Number Formatting** - Shows decimals instead of whole numbers ✅ FIXED
-- [ ] **P&L Calculation Incorrect** - Formula needs verification ⚡ CURRENT
-- [ ] **AI Response Truncation** - Only 3 of 6 positions returned
-- [ ] **Option Greeks Not Fetched** - Need Polygon integration after upload
+- [x] **P&L Calculation Incorrect** - Implemented dual metrics (optionMTM + wheelNet) ✅ FIXED
+- [x] **AI Response Truncation** - Fixed with increased tokens and JSON mode ✅ FIXED
+- [ ] **Option Greeks Not Fetched** - Need Polygon integration after upload ⚡ NEXT
 
 ### Known Issues
 - [ ] Can only upload one chart at a time

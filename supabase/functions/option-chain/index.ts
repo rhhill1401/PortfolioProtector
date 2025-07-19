@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
       }
 
       // Transform the data to find the optimal wheel strategy option
-      chain = transformPolygon(data.results);
+      chain = transformPolygon(data.results, underlying);
       
       if (!chain) {
         return new Response(
@@ -188,12 +188,13 @@ Deno.serve(async (req) => {
 });
 
 /**
- * Find the optimal option for wheel strategy:
+ * Find the optimal option for wheel strategy targeting 30-45% annual returns:
  * - Call options only
  * - 20-60 days to expiration
- * - Delta closest to 0.325 (between 0.30-0.35)
+ * - Calculate annualized return and filter for 30-45% range
+ * - Among qualifying options, prefer delta around 0.30-0.35
  */
-function transformPolygon(options: PolygonOption[]): TransformedOption | null {
+function transformPolygon(options: PolygonOption[], underlying?: number | null): TransformedOption | null {
   const today = new Date();
   
   console.log(`transformPolygon: Processing ${options.length} options`);
@@ -268,11 +269,62 @@ function transformPolygon(options: PolygonOption[]): TransformedOption | null {
     return null;
   }
 
-  // Find the option with delta closest to 0.325
+  // If we don't have underlying price, fall back to delta-based selection
+  if (!underlying || underlying <= 0) {
+    console.log('No underlying price available, using delta-based selection');
+    const targetDelta = 0.325;
+    validCalls.sort((a, b) => 
+      Math.abs(a.delta - targetDelta) - Math.abs(b.delta - targetDelta)
+    );
+    return validCalls[0];
+  }
+
+  // Calculate annualized return for each option
+  const optionsWithReturns = validCalls.map(opt => {
+    // Annualized Return = (Premium / Strike) × (365 / DTE) × 100
+    const annualizedReturn = (opt.mid / opt.strike) * (365 / opt.dte) * 100;
+    return { ...opt, annualizedReturn };
+  });
+
+  console.log('Options with annualized returns:', optionsWithReturns.map(o => ({
+    strike: o.strike,
+    dte: o.dte,
+    premium: o.mid,
+    annualReturn: o.annualizedReturn.toFixed(1) + '%',
+    delta: o.delta
+  })));
+
+  // Filter for options that yield 30-45% annually
+  const highYieldOptions = optionsWithReturns.filter(opt => 
+    opt.annualizedReturn >= 30 && opt.annualizedReturn <= 45
+  );
+
+  // If we have high-yield options, pick the one with delta closest to 0.325
+  if (highYieldOptions.length > 0) {
+    const targetDelta = 0.325;
+    highYieldOptions.sort((a, b) => 
+      Math.abs(a.delta - targetDelta) - Math.abs(b.delta - targetDelta)
+    );
+    console.log(`Found ${highYieldOptions.length} options with 30-45% annual return`);
+    return highYieldOptions[0];
+  }
+
+  // If no options yield 30-45%, find the highest yielding option with reasonable delta
+  const reasonableDeltaOptions = optionsWithReturns.filter(opt => 
+    opt.delta >= 0.20 && opt.delta <= 0.40
+  );
+
+  if (reasonableDeltaOptions.length > 0) {
+    // Sort by annualized return (highest first)
+    reasonableDeltaOptions.sort((a, b) => b.annualizedReturn - a.annualizedReturn);
+    console.log(`No 30-45% options found, returning highest yield option: ${reasonableDeltaOptions[0].annualizedReturn.toFixed(1)}%`);
+    return reasonableDeltaOptions[0];
+  }
+
+  // Final fallback: just return the option with best delta
   const targetDelta = 0.325;
   validCalls.sort((a, b) => 
     Math.abs(a.delta - targetDelta) - Math.abs(b.delta - targetDelta)
   );
-
   return validCalls[0];
 }

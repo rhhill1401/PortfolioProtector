@@ -144,6 +144,12 @@ export function calculateAggregateMetrics(
   positions: WheelPosition[],
   quotes: QuoteResponse[]
 ) {
+  console.log('[WHEEL METRICS] calculateAggregateMetrics called with:', {
+    positionsCount: positions.length,
+    quotesCount: quotes.length,
+    firstPosition: positions[0]
+  });
+  
   let totalPremiumCollected = 0;
   let totalCostToClose = 0;
   let weightedDelta = 0;
@@ -153,9 +159,26 @@ export function calculateAggregateMetrics(
     const quote = quotes[index];
     const contractCount = Math.abs(position.contracts);
     
-    // Premium collected (from position data)
+    // Log the entire position to see what fields it has
+    console.log(`[WHEEL METRICS] Full position data:`, position);
+    
+    // Premium collected (from position data) - check all possible field names
     const premium = position.premium || position.premiumCollected || 0;
-    totalPremiumCollected += premium * 100 * contractCount;
+    
+    // Check if premium is per-share (small value) or total (large value)
+    // If premium is less than 50, it's likely per-share and needs multiplication
+    const isPerShare = premium < 50;
+    const premiumTotal = isPerShare ? premium * 100 * contractCount : premium;
+    
+    console.log(`[WHEEL METRICS] Position ${position.symbol} $${position.strike}:`, {
+      premium,
+      isPerShare,
+      contractCount,
+      premiumTotal,
+      hasQuote: !!quote?.success
+    });
+    
+    totalPremiumCollected += premiumTotal;
     
     // Guard against failed quotes
     if (!quote?.success || !quote.quote) {

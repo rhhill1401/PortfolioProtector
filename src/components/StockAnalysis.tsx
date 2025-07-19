@@ -12,12 +12,11 @@ import axios from 'axios';
 import { useOptionChain } from '@/hooks/useOptionChain';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
 import { 
-	cycleCredit, 
-	grossYield,
 	compounding,
 	estimateAssignmentProb
 } from '@/services/wheelMath';
 import { calculateAggregateMetrics } from '@/services/optionLookup';
+import { groupPositionsByTimeframe, formatExpiryLabel } from '@/services/wheelTimeAnalysis';
 
 interface StockAnalysisProps {
 	tickerSymbol: string;
@@ -240,10 +239,20 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				return dateStr;
 			};
 			
-			return {
-				...pos,
-				expiry: parseExpiry(pos.expiry)
+			// Map position ensuring we keep all fields including premium data
+			const mappedPosition = {
+				symbol: pos.symbol,
+				strike: pos.strike,
+				expiry: parseExpiry(pos.expiry),
+				type: (pos.optionType || pos.type || 'CALL') as 'CALL' | 'PUT',
+				contracts: pos.contracts,
+				// Include both possible premium field names
+				premium: pos.premium,
+				premiumCollected: pos.premiumCollected
 			};
+			
+			console.log('[WHEEL POSITIONS] Mapped position:', mappedPosition);
+			return mappedPosition;
 		});
 	}, [analysisData?.wheelStrategy?.currentPositions]);
 	
@@ -873,103 +882,117 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										</CardContent>
 									</Card>
 
-									{/* Wheel Strategy Metrics Card */}
+									{/* Wheel Strategy Metrics Card - Time-Based View */}
 									<Card className="w-full mt-4">
 										<CardHeader className="pb-3">
 											<CardTitle className="text-lg">Wheel Strategy Metrics</CardTitle>
-											<CardDescription>Performance and risk metrics</CardDescription>
+											<CardDescription>Time-based performance breakdown</CardDescription>
 										</CardHeader>
 										<CardContent>
 											<div className="space-y-4">
 												{(() => {
-													// Use real-time quotes if available, otherwise show loading/placeholder
+													// Get positions and quotes
 													const positions = analysisData.wheelStrategy?.currentPositions || [];
+													console.log('[WHEEL METRICS UI] Positions from analysis:', positions);
+													console.log('[WHEEL METRICS UI] Wheel quotes:', wheelQuotes);
 													
-													// Calculate metrics using real quotes - filter for successful quotes only
+													const timeGroups = groupPositionsByTimeframe(positions, wheelQuotes);
+													
+													// Calculate overall metrics
 													const goodQuotes = wheelQuotes.filter(q => q.success && q.quote);
-													const metrics = goodQuotes.length > 0 
+													const overallMetrics = goodQuotes.length > 0 
 														? calculateAggregateMetrics(positions, wheelQuotes)
 														: null;
 													
-													// Variables for next cycle calculations moved to where they're used
-													
-													// Use aggregate metrics if available
-													const totalPremiumCollected = metrics?.totalPremiumCollected || 0;
-													const costToClosePosition = metrics?.totalCostToClose || null;
-													const unrealizedPL = metrics?.unrealizedPL || null;
-													const maxProfitPotential = totalPremiumCollected;
+													const totalPremiumCollected = overallMetrics?.totalPremiumCollected || 0;
+													const totalCostToClose = overallMetrics?.totalCostToClose || 0;
+													const netPositionValue = totalPremiumCollected - totalCostToClose;
 													
 													return (
 														<>
-															{/* Total Premium Collected */}
-															<div className="flex justify-between items-baseline border-b pb-2">
-																<span className="text-sm text-gray-600">Total Premium Collected</span>
-																<div className="text-right">
-																	<span className="text-lg font-bold">${Math.round(totalPremiumCollected)}</span>
-																	<span className="text-xs text-green-600 ml-1">+8.02%</span>
+															{/* Overall Summary Section */}
+															<div className="pb-4 border-b">
+																<div className="flex justify-between items-baseline mb-2">
+																	<span className="text-sm text-gray-600">Total Premium Collected</span>
+																	<span className="text-lg font-bold">
+																		${Math.round(totalPremiumCollected).toLocaleString()}
+																	</span>
+																</div>
+																<div className="flex justify-between items-baseline mb-2">
+																	<span className="text-sm text-gray-600">Net Position Value</span>
+																	<span className={`text-lg font-bold ${netPositionValue >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+																		{netPositionValue >= 0 ? '+' : ''}${Math.round(Math.abs(netPositionValue)).toLocaleString()}
+																	</span>
+																</div>
+																<div className="flex justify-between items-baseline">
+																	<span className="text-sm text-gray-600">Cost to Close All</span>
+																	<span className="text-lg font-bold">
+																		${Math.round(totalCostToClose).toLocaleString()}
+																	</span>
 																</div>
 															</div>
 															
-															{/* Unrealized P&L */}
-															<div className="flex justify-between items-baseline border-b pb-2">
-																<span className="text-sm text-gray-600">Unrealized P&L</span>
-																<div className="text-right">
-																	{unrealizedPL !== null ? (
-																		<>
-																			<span className="text-lg font-bold">{unrealizedPL >= 0 ? '+' : ''}${Math.round(Math.abs(unrealizedPL))}</span>
-																			{totalPremiumCollected > 0 && (
-																				<span className={`text-xs ml-1 ${unrealizedPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-																					{unrealizedPL >= 0 ? '+' : ''}{((unrealizedPL / totalPremiumCollected) * 100).toFixed(1)}%
+															{/* Time-Based Breakdown */}
+															{timeGroups.length > 0 ? (
+																timeGroups.map((group, idx) => (
+																	<div key={idx} className="pt-3 border-t">
+																		<div className="mb-2">
+																			<span className="text-sm font-semibold">📅 {group.label}</span>
+																			<span className="text-xs text-gray-500 ml-2">
+																				({formatExpiryLabel(group.expiryDate)})
+																			</span>
+																		</div>
+																		
+																		<div className="grid grid-cols-2 gap-2 text-sm">
+																			<div>
+																				<span className="text-gray-600">Premium Collected: </span>
+																				<span className="font-semibold">
+																					${Math.round(group.totalPremiumCollected).toLocaleString()}
 																				</span>
-																			)}
-																		</>
-																	) : (
-																		<span className="text-xs text-gray-400">Loading...</span>
-																	)}
-																</div>
-															</div>
-															
-															{/* Cost to Close (was Net Premium Remaining) */}
-															<div className="flex justify-between items-baseline border-b pb-2">
-																<span className="text-sm text-gray-600">Cost to Close</span>
-																<div className="text-right">
-																	{costToClosePosition !== null ? (
-																		<>
-																			<span className="text-lg font-bold">${Math.round(costToClosePosition)}</span>
-																			{totalPremiumCollected > 0 && (
-																				<span className="text-xs text-gray-600 ml-1">
-																					{((costToClosePosition / totalPremiumCollected) * 100).toFixed(0)}% of collected
+																			</div>
+																			<div>
+																				<span className="text-gray-600">Shares at Risk: </span>
+																				<span className="font-semibold">
+																					{group.totalSharesAtRisk.toLocaleString()}
 																				</span>
-																			)}
-																		</>
-																	) : (
-																		<span className="text-xs text-gray-400">Loading...</span>
-																	)}
-																</div>
-															</div>
-															
-															{/* Position-Weighted Average Return */}
-															{positions.length > 0 && metrics && (
-																<div className="flex justify-between items-baseline border-b pb-2">
-																	<span className="text-sm text-gray-600">Average Position Delta</span>
-																	<div className="text-right">
-																		{metrics.averageDelta !== null ? (
-																			<span className="text-lg font-bold">{(metrics.averageDelta * 100).toFixed(1)}%</span>
-																		) : (
-																			<span className="text-xs text-gray-400">No delta data</span>
-																		)}
+																			</div>
+																		</div>
+																		
+																		<div className="grid grid-cols-2 gap-2 text-sm mt-1">
+																			<div>
+																				<span className="text-gray-600">Cost to Close: </span>
+																				<span className="font-semibold">
+																					${Math.round(group.totalCostToClose).toLocaleString()}
+																				</span>
+																			</div>
+																			<div>
+																				<span className="text-gray-600">Net P&L: </span>
+																				<span className={`font-semibold ${group.netPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+																					{group.netPL >= 0 ? '+' : ''}${Math.round(Math.abs(group.netPL)).toLocaleString()}
+																				</span>
+																			</div>
+																		</div>
+																		
+																		<div className="text-sm mt-1">
+																			<span className="text-gray-600">Assignment Prob: </span>
+																			<span className={`font-semibold ${
+																				group.avgAssignmentProb > 0.7 ? 'text-red-600' :
+																				group.avgAssignmentProb > 0.3 ? 'text-yellow-600' :
+																				'text-green-600'
+																			}`}>
+																				{(group.avgAssignmentProb * 100).toFixed(1)}%
+																			</span>
+																			<span className="text-xs text-gray-500 ml-2">
+																				({group.positions.map(p => `$${p.strike}`).join(', ')})
+																			</span>
+																		</div>
 																	</div>
+																))
+															) : (
+																<div className="text-center text-gray-500 py-4">
+																	No active option positions
 																</div>
 															)}
-															
-															{/* Max Profit Potential */}
-															<div className="flex justify-between items-baseline">
-																<span className="text-sm text-gray-600">Max Profit Potential</span>
-																<div className="text-right">
-																	<span className="text-lg font-bold">${maxProfitPotential.toFixed(2)}</span>
-																	<span className="text-xs text-gray-500 ml-1">Target</span>
-																</div>
-															</div>
 														</>
 													);
 												})()}
@@ -981,24 +1004,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 									{optionChainData?.success && optionChainData.chain && (
 										<Card className="w-full mt-4">
 											<CardHeader className="pb-3">
-												<CardTitle className="text-lg">Next 30-45% Wheel Opportunity</CardTitle>
-												<CardDescription>Optimal position for next cycle based on current market</CardDescription>
+												<CardTitle className="text-lg">Next Wheel Opportunity (Target: 30-45% Annual)</CardTitle>
+												<CardDescription>Searching for high-yield covered call positions</CardDescription>
 											</CardHeader>
 											<CardContent>
 												<div className="space-y-3">
 													{(() => {
 														// Calculate these values inside the card where they're used
-														const shareCount = analysisData.wheelStrategy?.shareCount || 100;
 														const currentPrice = displayData?.summary?.currentPrice || priceInfo.price || 0;
 														
 														// Calculate potential return for next cycle (from option chain)
-														const nextCycleReturn = optionChainData?.success && optionChainData.chain && currentPrice > 0
-															? grossYield(
-																	cycleCredit(optionChainData.chain.mid),
-																	shareCount,
-																	currentPrice,
-																	optionChainData.chain.dte
-																)
+														// For wheel opportunity, always calculate based on 100 shares per contract
+														const nextCycleReturn = optionChainData?.success && optionChainData.chain
+															? (optionChainData.chain.mid / optionChainData.chain.strike) * (365 / optionChainData.chain.dte) * 100
 															: null;
 														
 														// Calculate assignment probability for next cycle
@@ -1031,8 +1049,20 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 													</div>
 													<div className="flex justify-between items-baseline border-t pt-2">
 														<span className="text-sm font-medium text-gray-700">Annualized Return</span>
-														<span className="text-lg font-bold text-green-600">
-															{nextCycleReturn ? `${nextCycleReturn.toFixed(1)}%` : 'N/A'}
+														<span className={`text-lg font-bold ${
+															nextCycleReturn && nextCycleReturn >= 30 && nextCycleReturn <= 45 
+																? 'text-green-600' 
+																: nextCycleReturn && nextCycleReturn > 45 
+																	? 'text-yellow-600' 
+																	: 'text-orange-600'
+														}`}>
+															{nextCycleReturn ? (
+																<>
+																	{nextCycleReturn.toFixed(1)}%
+																	{nextCycleReturn >= 30 && nextCycleReturn <= 45 && ' ✓'}
+																	{nextCycleReturn < 30 && ' (Below target)'}
+																</>
+															) : 'N/A'}
 														</span>
 													</div>
 													<div className="flex justify-between items-baseline">

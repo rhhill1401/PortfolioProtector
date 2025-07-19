@@ -114,20 +114,61 @@
   - Assignment probability based on real delta values
   - Stale data indicators (>30 minutes)
 - **Testing**: Created unit tests and end-to-end test
-- **Status**: Fully implemented and ready for deployment
+- **Status**: Fully implemented, tested, and committed to GitHub
+
+### Critical Bug Fixed
+- **Issue**: Greeks API returning 400 errors due to date format mismatch
+- **Root Cause**: Portfolio-vision returning "Jul-18-2025" format, Polygon expects "2025-07-18"
+- **Fix**: Added date conversion in TickerPriceSearch.tsx
+- **Lesson**: End-to-end tests must use actual API responses, not mock data
+- **Documentation**: Created `/docs/bugs-and-fixes/001-greeks-date-format-bug.md`
 
 ### Greeks Display in UI
 - Delta, Gamma, Theta, Vega, IV shown for each position
 - Assignment probability color-coded (red >70%, yellow 30-70%, green <30%)
-- Theta shown as $/day for easy understanding
+- Theta shown as $/day for easy understanding (fixed 100x multiplier bug)
 - "N/A" displayed when Greeks unavailable
 
-## Next Session Instructions
-1. **Start Phase 4**: Fix Wheel Strategy Metrics
-   - Implement all wheel strategy formulas
-   - Connect real Polygon data to calculations
-   - Test with real positions
-2. **Continue to Phase 5**: Number Formatting
-   - Create formatting utilities
-   - Apply to all financial displays
-3. **Goal**: Complete wheel strategy metrics with professional formatting
+### Code Review Improvements Applied
+- Fixed sliding window rate limiting bug
+- Added proper TypeScript types for optionGreeks
+- Fixed theta display calculation
+- Added token limit protection (15 positions max)
+- Improved test coverage with real data
+
+## Next Session Instructions (Phase 4: Fix Wheel Strategy Metrics)
+
+### Current Issues to Fix
+1. **Total Premium Collected**: Shows $0 instead of actual $16,219
+2. **Unrealized P&L**: Shows "Loading..." indefinitely
+3. **Cost to Close**: Shows "Loading..." indefinitely
+4. **Max Profit Potential**: Shows $0.00
+5. **Next 30-45% Wheel Opportunity**: Shows hardcoded IBIT $72 CALL
+6. **Assignment Probability**: Shows static 8% instead of dynamic calculation
+
+### Implementation Tasks
+1. **Debug why metrics don't display**
+   - Check data flow from analysis to wheel metrics component
+   - Verify calculations are receiving correct data
+   
+2. **Connect real data to calculations**
+   - Total premium from all positions
+   - Current market values for P&L
+   - Live quotes for cost to close
+   
+3. **Implement formulas**:
+   - Annualized Return = (credit/capital) × (365/DTE) × 100
+   - Assignment Probability from actual Greeks (delta-based)
+   - Compounded 12-month returns
+   - Max profit potential calculations
+   
+4. **Fix "Next Wheel Opportunity"**
+   - Calculate optimal next strike based on current price
+   - Use real market data and Greeks
+   - Show actual optimal contract, not hardcoded
+
+### Key Files to Review
+- `/src/components/StockAnalysis.tsx` - Wheel metrics display
+- `/src/services/wheelMath.ts` - Calculation functions
+- `/src/hooks/useWheelQuotes.ts` - Live quote fetching
+- Analysis data structure for available fields

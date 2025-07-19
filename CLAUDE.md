@@ -172,3 +172,6 @@ VITE_SUPABASE_FN_URL=your_functions_url
 ❌ Not Implemented (Optional Phase 6):
 - Options Greeks chart showing assignment probabilities
 - Wheel Execution, Assignment Success, Continuation Plan tab content
+
+## Testing Principles
+- When performing integrated tests, use real data. Do not hardcode data. So if you're running an end-to-end test, it should be with real data. For example, if you had to upload an image, you should upload a real image, run all the APIs and tests with that data and then show the results. Don't hardcode in data.

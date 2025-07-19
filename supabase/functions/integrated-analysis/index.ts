@@ -138,7 +138,10 @@ Deno.serve(async (req) => {
   // 🎯 WHEEL STRATEGY ANALYSIS - Detect portfolio position and wheel phase
   const hasPosition = portfolio?.positions?.some(p => p.symbol === ticker) || false;
   const currentShares = portfolio?.positions?.find(p => p.symbol === ticker)?.quantity || 0;
-  const costBasis = portfolio?.positions?.find(p => p.symbol === ticker)?.purchasePrice || currentPrice;
+  const rawPurchase = portfolio?.positions?.find(p => p.symbol === ticker)?.purchasePrice;
+  const costBasis = typeof rawPurchase === 'number' && Number.isFinite(rawPurchase) 
+    ? rawPurchase 
+    : currentPrice; // Use current price as fallback when purchase price is "Unknown" or invalid
   
   // 📊 EXTRACT ACTUAL OPTION POSITIONS from portfolio metadata
   
@@ -211,7 +214,7 @@ Deno.serve(async (req) => {
   const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => {
     // Get Greeks for this position if available
     const positionKey = `${opt.symbol}-${opt.strike}-${opt.expiry}-${opt.optionType}`;
-    const positionGreeks = optionGreeks[positionKey] as OptionQuote | undefined;
+    const positionGreeks = optionGreeks && optionGreeks[positionKey] as OptionQuote | undefined;
     
     // Debug: Log each position lookup
     console.log(`🔍 [DEBUG] Looking up Greeks for position:`, {
@@ -364,6 +367,7 @@ Return this JSON structure:
       currentOptionPositions.slice(0, 15).map((opt: unknown) => {
         const position = opt as Record<string, unknown>;
         return `{
+        "symbol": "${position.symbol || 'UNKNOWN'}",
         "strike": ${position.strike || 0},
         "expiry": "${position.expiry || 'Unknown'}",
         "type": "${position.optionType || 'CALL'}",

@@ -1,7 +1,7 @@
 # PortfolioProtector Implementation Roadmap
 
-Last Updated: July 13, 2025
-Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
+Last Updated: July 19, 2025
+Status: Phase 4 Completed (Wheel Strategy Metrics), Phase 5 In Progress (Tab Reorganization)
 
 ## Current Bugs & Issues 🐛
 
@@ -12,7 +12,7 @@ Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
 - [x] **Number Formatting** - Shows decimals instead of whole numbers ✅ FIXED
 - [x] **P&L Calculation Incorrect** - Implemented dual metrics (optionMTM + wheelNet) ✅ FIXED
 - [x] **AI Response Truncation** - Fixed with increased tokens and JSON mode ✅ FIXED
-- [ ] **Option Greeks Not Fetched** - Need Polygon integration after upload ⚡ NEXT
+- [x] **Option Greeks Not Fetched** - Need Polygon integration after upload ✅ FIXED
 
 ### Known Issues
 - [ ] Can only upload one chart at a time
@@ -108,19 +108,57 @@ Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
 - [x] Display Greeks and assignment probability in UI
 - [x] Rate limiting implementation (5 requests/minute)
 - [x] 1-hour cache with stale data indicators
+- [x] Fixed date format bug (Jul-18-2025 → 2025-07-18)
+- [x] Created comprehensive test suite
+- [x] Documented bug fix in bugs-and-fixes folder
 
 ### 🎯 NEAR-TERM PHASES (Complete Core Features)
 
-#### Phase 4: Fix Wheel Strategy Metrics
-- [ ] Debug why metrics don't display
-- [ ] Connect real Polygon data to calculations
-- [ ] Implement all formulas:
-  - [ ] Annualized Return = (credit/capital) × (365/DTE) × 100
-  - [ ] Assignment Probability (dynamic)
-  - [ ] Compounded 12-month returns
-- [ ] Test with real positions
+#### Phase 4: Fix Wheel Strategy Metrics ✅ COMPLETED
+- [x] Debug why metrics show $0 instead of $16,219 premium
+  - [x] Fixed missing symbol field in integrated-analysis wheel positions
+  - [x] Fixed frontend premium field mapping (premium vs premiumCollected)
+- [x] Fix "Loading..." for Unrealized P&L and Cost to Close
+  - [x] Implemented time-based view (30 days, 90 days, long-term)
+  - [x] Fixed cost to close calculation (was multiplying by 100 too many times)
+  - [x] Net P&L now shows realistic values
+- [x] Connect real data to calculations:
+  - [x] Total premium from all positions: $16,219
+  - [x] Current market values for P&L
+  - [x] Fallback to position currentValue when no live quotes
+- [x] Implement formulas:
+  - [x] Annualized Return = (premium/strike) × (365/DTE) × 100
+  - [x] Fixed frontend to use strike price not total capital
+  - [x] Shows "Below target" indicator when < 30%
+- [x] Fix "Next Wheel Opportunity" to calculate optimal strike
+  - [x] Now searches for 30-45% annual return options
+  - [x] Falls back to highest yield if none meet target
+  - [x] Visual indicators for in/out of target range
+- [x] Test with real positions from portfolio upload
 
-#### Phase 5: Number Formatting
+#### Phase 5: Tab Reorganization & Enhanced Wheel Execution ⚡ IN PROGRESS
+- [ ] Switch integrated-analysis to OpenAI o3 model
+  - [ ] Change model from "gpt-4o" to "o3" 
+  - [ ] Deploy updated function
+  - [ ] Test enhanced reasoning capabilities
+- [ ] Reorganize tabs for better UX:
+  - [ ] Move Wheel Strategy Metrics from Performance to Wheel Execution tab
+  - [ ] Move Next Wheel Opportunity from Performance to Wheel Execution tab
+  - [ ] Performance tab focuses on: Position Status, IV Environment, Assignment Risk, Current Positions
+- [ ] Create Position Action Guide card (NEW):
+  - [ ] Plain English "Do This / Don't Do That" for each position
+  - [ ] Specific price triggers (e.g., "if IBIT ≥ $69")
+  - [ ] What to watch next with exact conditions
+  - [ ] Rolling strategies (e.g., "Roll ONE at a time when delta ≥ 0.90")
+  - [ ] No financial jargon - just actionable instructions
+  - [ ] Example: "Do nothing. Let it be called away Friday at $61"
+  - [ ] Cash position guidance for selling puts
+- [ ] Enhance Next Wheel Opportunity card:
+  - [ ] Show total return (option premium + stock appreciation)
+  - [ ] Add risk/reward breakdown
+  - [ ] Clear go/no-go recommendations
+
+#### Phase 6: Number Formatting
 - [ ] Create formatting utilities
 - [ ] Currency: 16000 → $16,000 (no cents)
 - [ ] Percentages: 0.0825 → 8.25%
@@ -192,9 +230,22 @@ Status: Phase 3.8 Completed (Wheel P&L Patch), Phase 3.9 Next (Option Greeks)
 
 ## Current Focus 🎯
 
-Working on: **Phase 4 - Fix Wheel Strategy Metrics**
+Working on: **Phase 5 - Tab Reorganization & Enhanced Wheel Execution**
 
-Next up: **Phase 5 - Number Formatting**
+Current tasks:
+- Switching integrated-analysis to OpenAI o3 model for better reasoning
+- Moving wheel components to dedicated Wheel Execution tab
+- Creating Position Action Guide with plain English instructions
+- Enhancing Next Wheel Opportunity with total return calculations
+
+Completed in Phase 4:
+- ✅ Total Premium Collected: Now shows $16,219 correctly
+- ✅ Cost to Close: Fixed calculation bug (was showing millions)
+- ✅ Net P&L: Shows realistic values with time-based breakdown
+- ✅ Next Wheel Opportunity: Now targets 30-45% annual returns
+- ✅ Fixed missing symbol field in wheel positions
+
+Next up: **Phase 6 - Number Formatting**
 
 ## Success Criteria ✅
 

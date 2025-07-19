@@ -29,3 +29,6 @@ dist-ssr
 
 # MCP configuration
 .mcp.json
+
+# Temporary test files
+tests/scratch/

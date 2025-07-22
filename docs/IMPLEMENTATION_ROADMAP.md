@@ -1,7 +1,7 @@
 # PortfolioProtector Implementation Roadmap
 
-Last Updated: July 19, 2025
-Status: Phase 4 Completed (Wheel Strategy Metrics), Phase 5 In Progress (Tab Reorganization)
+Last Updated: July 22, 2025
+Status: Phase 4 Completed (Wheel Strategy Metrics), Phase 5.5 In Progress (Recommendations Tab)
 
 ## Current Bugs & Issues 🐛
 
@@ -136,27 +136,51 @@ Status: Phase 4 Completed (Wheel Strategy Metrics), Phase 5 In Progress (Tab Reo
   - [x] Visual indicators for in/out of target range
 - [x] Test with real positions from portfolio upload
 
-#### Phase 5: Tab Reorganization & Enhanced Wheel Execution ⚡ IN PROGRESS
-- [ ] Switch integrated-analysis to OpenAI o3 model
-  - [ ] Change model from "gpt-4o" to "o3" 
-  - [ ] Deploy updated function
-  - [ ] Test enhanced reasoning capabilities
-- [ ] Reorganize tabs for better UX:
-  - [ ] Move Wheel Strategy Metrics from Performance to Wheel Execution tab
-  - [ ] Move Next Wheel Opportunity from Performance to Wheel Execution tab
-  - [ ] Performance tab focuses on: Position Status, IV Environment, Assignment Risk, Current Positions
-- [ ] Create Position Action Guide card (NEW):
-  - [ ] Plain English "Do This / Don't Do That" for each position
-  - [ ] Specific price triggers (e.g., "if IBIT ≥ $69")
-  - [ ] What to watch next with exact conditions
-  - [ ] Rolling strategies (e.g., "Roll ONE at a time when delta ≥ 0.90")
-  - [ ] No financial jargon - just actionable instructions
-  - [ ] Example: "Do nothing. Let it be called away Friday at $61"
-  - [ ] Cash position guidance for selling puts
-- [ ] Enhance Next Wheel Opportunity card:
-  - [ ] Show total return (option premium + stock appreciation)
-  - [ ] Add risk/reward breakdown
-  - [ ] Clear go/no-go recommendations
+#### Phase 5: Tab Reorganization & Enhanced Wheel Execution ✅ COMPLETED
+- [x] Switch integrated-analysis to OpenAI o3 model (decided to stay with gpt-4o for now)
+- [x] Reorganize tabs for better UX:
+  - [x] Move Wheel Strategy Metrics from Performance to Wheel Execution tab
+  - [x] Move Next Wheel Opportunity from Performance to Wheel Execution tab
+  - [x] Performance tab focuses on: Position Status, IV Environment, Assignment Risk, Current Positions
+- [x] Create Position Action Guide card (NEW):
+  - [x] Plain English "Do This / Don't Do That" for each position
+  - [x] Specific price triggers (e.g., "if IBIT ≥ $69")
+  - [x] What to watch next with exact conditions
+  - [x] Rolling strategies (e.g., "Roll ONE at a time when delta ≥ 0.90")
+  - [x] No financial jargon - just actionable instructions
+  - [x] Example: "Do nothing. Let it be called away Friday at $61"
+  - [x] Cash position guidance for selling puts
+- [x] Enhance Next Wheel Opportunity card:
+  - [x] Show total return (option premium + stock appreciation)
+  - [x] Add risk/reward breakdown
+  - [x] Clear go/no-go recommendations
+
+#### Phase 5.5: AI-Powered Recommendations Tab ⚡ IN PROGRESS
+- [x] Organize test files into proper directory structure
+  - [x] Move 22+ test files from root to /tests directory
+  - [x] Create /tests/edge-functions, /tests/integration, /tests/outputs
+  - [x] Update .gitignore for test outputs
+- [ ] Replace "Assignment Success" tab with "Recommendations"
+  - [ ] Backend: Enhance integrated-analysis with recommendations section
+    - [ ] Add position snapshot with P&L
+    - [ ] Implement roll rules (price ≥ strike × 1.08 or delta ≥ 0.80)
+    - [ ] Cash management calculations ($6k buffer)
+    - [ ] Plain-English action plan generation
+  - [ ] Frontend: Create new Recommendations component
+    - [ ] Position snapshot table
+    - [ ] Roll analysis for each position
+    - [ ] Market context summary (simplified, no web search initially)
+    - [ ] Step-by-step action plan
+    - [ ] Conditional orders display
+- [ ] Testing approach:
+  - [ ] Start with existing data (no web search)
+  - [ ] Use GPT-4o (not o3 initially)
+  - [ ] Test with real portfolio data
+  - [ ] Only add complexity if recommendations lack quality
+- [ ] Future enhancements (if needed):
+  - [ ] Web search for BTC price, IV rank, ETF flows
+  - [ ] Real-time Greeks from option chain APIs
+  - [ ] Consider o3 model upgrade
 
 #### Phase 6: Number Formatting
 - [ ] Create formatting utilities
@@ -230,13 +254,19 @@ Status: Phase 4 Completed (Wheel Strategy Metrics), Phase 5 In Progress (Tab Reo
 
 ## Current Focus 🎯
 
-Working on: **Phase 5 - Tab Reorganization & Enhanced Wheel Execution**
+Working on: **Phase 5.5 - AI-Powered Recommendations Tab**
 
 Current tasks:
-- Switching integrated-analysis to OpenAI o3 model for better reasoning
-- Moving wheel components to dedicated Wheel Execution tab
-- Creating Position Action Guide with plain English instructions
-- Enhancing Next Wheel Opportunity with total return calculations
+- ✅ Organized all test files into proper directory structure
+- ⏳ Enhancing integrated-analysis with recommendations section
+- ⏳ Creating test file to validate AI recommendations
+- ⏳ Building new Recommendations component
+
+Completed in Phase 5:
+- ✅ Tab reorganization complete
+- ✅ Position Action Guide with plain English instructions
+- ✅ Enhanced Wheel Execution tab
+- ✅ Decided to stay with GPT-4o (not switching to o3 yet)
 
 Completed in Phase 4:
 - ✅ Total Premium Collected: Now shows $16,219 correctly

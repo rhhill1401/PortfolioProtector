@@ -30,6 +30,14 @@ dist-ssr
 # MCP configuration
 .mcp.json
 
-# Temporary test files
+# Test files and outputs
 tests/scratch/
 tests/outputs/
+test-*.js
+test-*.cjs
+test-*.json
+test-*.log
+*-test-*.json
+*-e2e-test-*.json
+integrated-analysis-full-output.txt
+portfolio-vision-*.json

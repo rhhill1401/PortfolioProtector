@@ -32,3 +32,4 @@ dist-ssr
 
 # Temporary test files
 tests/scratch/
+tests/outputs/

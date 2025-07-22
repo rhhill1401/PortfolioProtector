@@ -309,6 +309,11 @@ Deno.serve(async (req) => {
     volatilityEstimate
   });
   
+  // ✂️ Limit list to safest length for o3 (≤8 positions ≈ 2k tokens max)
+  const MAX_POSITIONS_FOR_PROMPT = 8;
+  const trimmedPositions = currentOptionPositions.slice(0, MAX_POSITIONS_FOR_PROMPT);
+  console.log(`🎯 [TOKEN LIMIT] Trimming ${currentOptionPositions.length} positions to ${trimmedPositions.length} for prompt`);
+  
   // Extract chart metrics
   const firstMetric = (chartMetrics as ChartMetric[])[0];
   const rsi = firstMetric?.rsi || 'Unknown';
@@ -328,9 +333,9 @@ PORTFOLIO DATA:
 • Portfolio Value: $${portfolio?.totalValue?.toLocaleString() || 'Unknown'}
 • Total Premium Collected: $${totalPremiumCollected.toFixed(2)}
 
-${currentOptionPositions.length > 0 ? 
-`UPLOADED OPTION POSITIONS (${currentOptionPositions.length} positions${currentOptionPositions.length > 15 ? ', showing first 15' : ''}):
-${currentOptionPositions.slice(0, 15).map((opt: unknown, index: number) => {
+${trimmedPositions.length > 0 ? 
+`UPLOADED OPTION POSITIONS (${trimmedPositions.length} positions):
+${trimmedPositions.map((opt: unknown, index: number) => {
   const position = opt as Record<string, unknown>;
   return `${index + 1}. $${position.strike} ${position.optionType} expiring ${position.expiry}
    - Contracts: ${position.contracts} (${position.position})
@@ -343,7 +348,7 @@ ${currentOptionPositions.slice(0, 15).map((opt: unknown, index: number) => {
    - Delta: ${position.delta !== null ? position.delta : 'N/A'}
    - Theta: ${position.theta !== null ? `$${Number(position.theta).toFixed(2)}/day` : 'N/A'}
    - IV: ${position.iv !== null ? `${(Number(position.iv) * 100).toFixed(1)}%` : 'N/A'}`;
-}).join('\n')}${currentOptionPositions.length > 15 ? `\n... and ${currentOptionPositions.length - 15} more positions (truncated to stay within token limit)` : ''}
+}).join('\n')}
 
 TASK: For each position above, provide wheel strategy analysis:
 1. Calculate assignment probability (use Delta if available, otherwise estimate from intrinsic value)
@@ -363,8 +368,8 @@ Return this JSON structure:
   "wheelStrategy": {
     "shareCount": ${currentShares},
     "currentPhase": "${wheelPhase}",
-    "currentPositions": [${currentOptionPositions.length > 0 ? 
-      currentOptionPositions.slice(0, 15).map((opt: unknown) => {
+    "currentPositions": [${trimmedPositions.length > 0 ? 
+      trimmedPositions.map((opt: unknown) => {
         const position = opt as Record<string, unknown>;
         return `{
         "symbol": "${position.symbol || 'UNKNOWN'}",
@@ -455,7 +460,7 @@ Return this JSON structure:
         messages: [
           { 
             role: "system", 
-            content: "You are a precision swing-trade analyst. Output ONLY valid JSON using EXACT prices provided. Never invent prices." 
+            content: "You are an options-wheel strategist. Output ONLY valid JSON using EXACT prices provided. Never invent prices." 
           },
           { role: "user", content: prompt },
         ],
@@ -468,9 +473,16 @@ Return this JSON structure:
     /* --- Extract JSON --- */
     let txt: string = aiJson.choices?.[0]?.message?.content ?? "";
     
+    // Log raw o3 response for debugging
+    console.log('🔍 [O3 RAW RESPONSE LENGTH]:', txt.length);
+    console.log('🔍 [O3 RAW RESPONSE START]:', txt.substring(0, 1000));
+    console.log('🔍 [O3 RAW RESPONSE END]:', txt.substring(txt.length - 500));
+    
     // Clean up response
     const first = txt.indexOf("{");
     const last = txt.lastIndexOf("}");
+    console.log('🔍 [O3 JSON BOUNDS]:', { first, last, hasValidBounds: first !== -1 && last !== -1 && last > first });
+    
     if (first !== -1 && last !== -1 && last > first) {
       txt = txt.slice(first, last + 1);
     }
@@ -480,6 +492,9 @@ Return this JSON structure:
       .replace(/^\s*```(?:json)?/i, "")
       .replace(/```+\s*$/i, "")
       .trim();
+
+      console.log('🔍 [O3 CLEANED TEXT LENGTH]:', txt.length);
+      console.log('🔍 [O3 CLEANED TEXT PREVIEW]:', txt.substring(0, 200));
 
       let analysis;
       try {

@@ -881,6 +881,186 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											})}
 										</CardContent>
 									</Card>
+								</>
+							) : (
+								<div className="text-center py-8">
+									<p className="text-gray-500">Wheel strategy analysis will appear here once analysis completes.</p>
+								</div>
+							)}
+						</TabsContent>
+
+						{/* Wheel Execution Tab Content */}
+						<TabsContent value='wheel-execution' className='space-y-4'>
+							{analysisData?.wheelStrategy ? (
+								<>
+									{/* Position Action Guide Card */}
+									<Card>
+										<CardHeader>
+											<CardTitle>Position Action Guide</CardTitle>
+											<CardDescription>
+												Plain English instructions for managing your positions
+											</CardDescription>
+										</CardHeader>
+										<CardContent>
+											<div className="space-y-4">
+												{(() => {
+													const positions = analysisData.wheelStrategy?.currentPositions || [];
+													const currentPrice = displayData?.summary?.currentPrice || priceInfo.price || 0;
+													
+													// Generate plain English guidance for each position
+													const generatePositionGuidance = (position: any) => {
+														const daysToExpiry = position.daysToExpiry || 0;
+														const delta = position.delta || 0;
+														const isCall = position.type === 'CALL';
+														const moneyness = ((currentPrice - position.strike) / position.strike) * 100;
+														
+														// Build guidance based on position characteristics
+														let action = '';
+														let watching = '';
+														let trigger = '';
+														
+														if (daysToExpiry <= 5) {
+															// Expiring soon
+															if (isCall && moneyness > 0) {
+																action = `Do nothing. Let it be called away on ${position.expiry} at $${position.strike}`;
+																watching = `Stock will be sold at $${position.strike} if price stays above strike`;
+															} else if (isCall && moneyness < 0) {
+																action = `Let it expire worthless on ${position.expiry}. Keep your shares and the premium`;
+																watching = `Option will expire worthless if ${tickerSymbol} stays below $${position.strike}`;
+															} else if (!isCall && moneyness < 0) {
+																action = `Do nothing. You'll be assigned shares at $${position.strike}`;
+																watching = `You'll buy shares at $${position.strike} if price stays below strike`;
+															} else {
+																action = `Let it expire worthless. Keep the premium`;
+																watching = `Option will expire worthless if ${tickerSymbol} stays above $${position.strike}`;
+															}
+														} else if (Math.abs(delta) > 0.90) {
+															// Deep in the money - high assignment risk
+															if (isCall) {
+																action = `Consider rolling if you want to keep shares. Otherwise, prepare for assignment`;
+																trigger = `Roll ONE at a time when ${tickerSymbol} drops below $${(position.strike * 0.98).toFixed(2)}`;
+																watching = `Very likely to be assigned. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%`;
+															} else {
+																action = `High chance of assignment. Prepare cash or consider rolling`;
+																trigger = `Roll if ${tickerSymbol} rises above $${(position.strike * 1.02).toFixed(2)}`;
+																watching = `Very likely to be assigned. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%`;
+															}
+														} else if (Math.abs(delta) > 0.70) {
+															// Moderate to high assignment risk
+															action = `Hold for now. Monitor daily`;
+															trigger = `Consider action if ${tickerSymbol} ${isCall ? 'rises above' : 'falls below'} $${(position.strike * (isCall ? 1.05 : 0.95)).toFixed(2)}`;
+															watching = `Assignment probability: ${(Math.abs(delta) * 100).toFixed(0)}%`;
+														} else if (Math.abs(delta) > 0.30) {
+															// Moderate risk
+															action = `Hold and collect theta decay`;
+															watching = `Earning $${Math.abs(position.theta || 0).toFixed(2)}/day from time decay`;
+															trigger = `Watch if ${tickerSymbol} moves ${isCall ? 'above' : 'below'} $${(position.strike * (isCall ? 0.98 : 1.02)).toFixed(2)}`;
+														} else {
+															// Low risk
+															action = `Hold to expiration. Very safe`;
+															watching = `Low assignment risk (${(Math.abs(delta) * 100).toFixed(0)}%). Earning $${Math.abs(position.theta || 0).toFixed(2)}/day`;
+														}
+														
+														return {
+															position,
+															action,
+															watching,
+															trigger,
+															moneyness,
+															riskLevel: Math.abs(delta) > 0.70 ? 'high' : Math.abs(delta) > 0.30 ? 'medium' : 'low'
+														};
+													};
+													
+													const guidanceItems = positions.map(generatePositionGuidance);
+													
+													// Check if user has cash for selling puts
+													const hasShares = analysisData.wheelStrategy?.shareCount > 0;
+													const availableShares = analysisData.wheelStrategy?.shareCount || 0;
+													const coveredShares = positions
+														.filter((p: any) => p.type === 'CALL')
+														.reduce((sum: number, p: any) => sum + Math.abs(p.contracts || 0) * 100, 0);
+													const uncoveredShares = Math.max(0, availableShares - coveredShares);
+													
+													return (
+														<>
+															{guidanceItems.length > 0 ? (
+																<>
+																	{/* Active Position Guidance */}
+																	{guidanceItems.map((item, idx) => (
+																		<div key={idx} className="border rounded-lg p-4 bg-gray-50">
+																			<div className="flex justify-between items-start mb-2">
+																				<div className="font-semibold text-sm">
+																					${item.position.strike} {item.position.type} - {item.position.expiry}
+																				</div>
+																				<span className={`text-xs px-2 py-1 rounded ${
+																					item.riskLevel === 'high' ? 'bg-red-100 text-red-700' :
+																					item.riskLevel === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+																					'bg-green-100 text-green-700'
+																				}`}>
+																					{item.riskLevel.toUpperCase()} RISK
+																				</span>
+																			</div>
+																			
+																			<div className="space-y-2 text-sm">
+																				<div className="flex items-start">
+																					<span className="font-medium text-gray-700 mr-2">Action:</span>
+																					<span className="text-gray-900">{item.action}</span>
+																				</div>
+																				
+																				<div className="flex items-start">
+																					<span className="font-medium text-gray-700 mr-2">Watching:</span>
+																					<span className="text-gray-600">{item.watching}</span>
+																				</div>
+																				
+																				{item.trigger && (
+																					<div className="flex items-start">
+																						<span className="font-medium text-gray-700 mr-2">Trigger:</span>
+																						<span className="text-blue-600">{item.trigger}</span>
+																					</div>
+																				)}
+																			</div>
+																		</div>
+																	))}
+																	
+																	{/* Cash/Share Position Guidance */}
+																	<div className="border-t pt-4 mt-4">
+																		<h4 className="font-semibold text-sm mb-2">New Position Guidance</h4>
+																		{uncoveredShares >= 100 ? (
+																			<div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+																				<div className="font-medium text-blue-900 mb-1">
+																					You have {uncoveredShares} uncovered shares
+																				</div>
+																				<div className="text-blue-700">
+																					Consider selling {Math.floor(uncoveredShares / 100)} covered calls at strikes above ${(currentPrice * 1.02).toFixed(2)} for additional income
+																				</div>
+																			</div>
+																		) : !hasShares ? (
+																			<div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+																				<div className="font-medium text-green-900 mb-1">
+																					Cash position available
+																				</div>
+																				<div className="text-green-700">
+																					Consider selling cash-secured puts at strikes below ${(currentPrice * 0.95).toFixed(2)} to acquire shares with premium income
+																				</div>
+																			</div>
+																		) : (
+																			<div className="text-gray-500 text-sm">
+																				All shares are covered with calls. Wait for positions to expire or get assigned.
+																			</div>
+																		)}
+																	</div>
+																</>
+															) : (
+																<div className="text-center text-gray-500 py-4">
+																	No active option positions to manage
+																</div>
+															)}
+														</>
+													);
+												})()}
+											</div>
+										</CardContent>
+									</Card>
 
 									{/* Wheel Strategy Metrics Card - Time-Based View */}
 									<Card className="w-full mt-4">
@@ -1086,24 +1266,9 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 								</>
 							) : (
 								<div className="text-center py-8">
-									<p className="text-gray-500">Wheel strategy analysis will appear here once analysis completes.</p>
+									<p className="text-gray-500">Wheel execution analysis will appear here once analysis completes.</p>
 								</div>
 							)}
-						</TabsContent>
-
-						{/* Wheel Execution Tab Content */}
-						<TabsContent value='wheel-execution' className='space-y-4'>
-							<Card>
-								<CardHeader>
-									<CardTitle>Wheel Execution Strategy</CardTitle>
-									<CardDescription>
-										Detailed execution plan for wheel strategy positions
-									</CardDescription>
-								</CardHeader>
-								<CardContent>
-									<p className="text-gray-500">Wheel execution analysis will appear here once analysis completes.</p>
-								</CardContent>
-							</Card>
 						</TabsContent>
 
 						{/* Assignment Success Tab Content */}

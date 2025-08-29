@@ -728,9 +728,9 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 								Wheel Execution
 							</TabsTrigger>
 							<TabsTrigger
-								value='assignment-success'
+								value='recommendations'
 								className='data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-gray-900 text-gray-500 rounded-md py-1.5 text-sm font-medium focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none'>
-								Assignment Success
+								Recommendations
 							</TabsTrigger>
 							<TabsTrigger
 								value='continuation-plan'
@@ -822,12 +822,14 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																	<span className="font-semibold">${position.currentValue || 'N/A'}</span>
 																</div>
 																<div>
-																	<span className="text-gray-600">Strategy P&L: </span>
-																	<span className={`font-bold text-lg ${(position.wheelNet || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-																		${Math.round(position.wheelNet || 0)}
+																	<span className="text-gray-600">Wheel P&L: </span>
+																	<span className={`font-bold text-lg text-green-600`}>
+																		${Math.round(position.wheelPnl || position.wheelNet || 0).toLocaleString()}
 																	</span>
 																	<br />
-																	<span className="text-xs text-gray-400">MTM: ${Math.round(position.optionMTM || position.profitLoss || 0)}</span>
+																	<span className="text-xs ${(position.markPnl || 0) < 0 ? 'text-red-500' : 'text-gray-400'}">
+																		Buy-to-close: ${Math.round(position.markPnl || position.optionMTM || 0).toLocaleString()}
+																	</span>
 																</div>
 															</div>
 															
@@ -1271,19 +1273,274 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							)}
 						</TabsContent>
 
-						{/* Assignment Success Tab Content */}
-						<TabsContent value='assignment-success' className='space-y-4'>
-							<Card>
-								<CardHeader>
-									<CardTitle>Assignment Success Analysis</CardTitle>
-									<CardDescription>
-										Probability and timing of assignment outcomes
-									</CardDescription>
-								</CardHeader>
-								<CardContent>
-									<p className="text-gray-500">Assignment success metrics will appear here once analysis completes.</p>
-								</CardContent>
-							</Card>
+						{/* Recommendations Tab Content */}
+						<TabsContent value='recommendations' className='space-y-4'>
+							{analysisData?.recommendations ? (
+								<>
+									{/* Position Snapshot */}
+									<Card>
+										<CardHeader>
+											<CardTitle>Position Snapshot</CardTitle>
+											<CardDescription>
+												Current holdings and performance
+											</CardDescription>
+										</CardHeader>
+										<CardContent>
+											<div className="overflow-x-auto">
+												<table className="w-full text-sm">
+													<thead>
+														<tr className="border-b">
+															<th className="text-left py-2">Type</th>
+															<th className="text-left py-2">Symbol</th>
+															<th className="text-right py-2">Qty</th>
+															<th className="text-right py-2">Strike/Basis</th>
+															<th className="text-right py-2">Premium</th>
+															<th className="text-right py-2">Profit</th>
+															<th className="text-left py-2">Status</th>
+														</tr>
+													</thead>
+													<tbody>
+														{analysisData.recommendations.positionSnapshot?.map((position, idx) => (
+															<tr key={idx} className="border-b">
+																<td className="py-2">{position.type}</td>
+																<td className="py-2">{position.ticker || '—'}</td>
+																<td className="text-right py-2">{position.quantity}</td>
+																<td className="text-right py-2">${Math.round(position.strike || position.basis).toLocaleString()}</td>
+																<td className="text-right py-2">
+																	{position.type === 'Covered Call' && position.premiumCollected ? 
+																		`$${Math.round(position.premiumCollected).toLocaleString()}` : 
+																		`$${Math.round(position.currentValue).toLocaleString()}`
+																	}
+																</td>
+																<td className={`text-right py-2 font-medium ${
+																	position.type === 'Covered Call' ? 'text-green-600' : 
+																	position.pl >= 0 ? 'text-green-600' : 'text-red-600'
+																}`}>
+																	{position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
+																		`$${Math.round(position.wheelProfit).toLocaleString()}` :
+																		position.type === 'Cash' ? '—' :
+																		position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
+																	}
+																</td>
+																<td className="py-2 text-xs text-gray-600 pl-4">{position.comment}</td>
+															</tr>
+														))}
+													</tbody>
+												</table>
+											</div>
+										</CardContent>
+									</Card>
+
+									{/* Roll Analysis */}
+									<Card>
+										<CardHeader>
+											<CardTitle>Roll Analysis</CardTitle>
+											<CardDescription>
+												Position-by-position roll recommendations
+											</CardDescription>
+										</CardHeader>
+										<CardContent className="space-y-4">
+											{analysisData.recommendations.rollAnalysis?.map((roll, idx) => (
+												<div key={idx} className="border rounded-lg p-4 bg-gray-50">
+													<div className="flex justify-between items-start mb-2">
+														<h4 className="font-semibold">{roll.position}</h4>
+														<span className={`px-2 py-1 rounded text-xs font-medium ${
+															roll.action === 'ROLL' ? 'bg-yellow-100 text-yellow-800' :
+															roll.action === 'HOLD' ? 'bg-green-100 text-green-800' :
+															'bg-gray-100 text-gray-800'
+														}`}>
+															{roll.action}
+														</span>
+													</div>
+													
+													<div className="grid grid-cols-2 gap-4 text-sm">
+														<div>
+															<p className="text-gray-600">Rule A (Price ≥ Strike × 1.08)</p>
+															<p className={`font-medium ${roll.ruleA.triggered ? 'text-red-600' : 'text-green-600'}`}>
+																{roll.ruleA.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
+															</p>
+															<p className="text-xs text-gray-500">{roll.ruleA.detail}</p>
+														</div>
+														<div>
+															<p className="text-gray-600">Rule B (Delta ≥ 0.80)</p>
+															<p className={`font-medium ${roll.ruleB.triggered ? 'text-red-600' : 'text-green-600'}`}>
+																{roll.ruleB.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
+															</p>
+															<p className="text-xs text-gray-500">{roll.ruleB.detail}</p>
+														</div>
+													</div>
+													
+													{roll.conditionalTrigger && (
+														<div className="mt-3 p-2 bg-yellow-50 rounded">
+															<p className="text-sm font-medium">📌 {roll.conditionalTrigger}</p>
+														</div>
+													)}
+													
+													{roll.recommendation && (
+														<p className="mt-2 text-sm text-gray-700">{roll.recommendation}</p>
+													)}
+												</div>
+											))}
+										</CardContent>
+									</Card>
+
+									{/* Cash Management */}
+									<Card>
+										<CardHeader>
+											<CardTitle>Cash Management</CardTitle>
+											<CardDescription>
+												Cash buffer and trading capacity
+											</CardDescription>
+										</CardHeader>
+										<CardContent>
+											{analysisData.recommendations.cashManagement && (
+												<div className="space-y-3">
+													<div className="flex justify-between items-center pb-3 border-b">
+														<span className="text-gray-600">Current Cash</span>
+														<span className="font-semibold">${Math.round(analysisData.recommendations.cashManagement.currentCash).toLocaleString()}</span>
+													</div>
+													<div className="flex justify-between items-center pb-3 border-b">
+														<span className="text-gray-600">Minimum Required</span>
+														<span className="font-semibold">${Math.round(analysisData.recommendations.cashManagement.minimumRequired).toLocaleString()}</span>
+													</div>
+													<div className="flex justify-between items-center pb-3 border-b">
+														<span className="text-gray-600">Available for Trades</span>
+														<span className={`font-semibold ${
+															analysisData.recommendations.cashManagement.currentCash >= 6000 
+																? 'text-green-600' 
+																: 'text-red-600'
+														}`}>
+															${Math.round(analysisData.recommendations.cashManagement.currentCash).toLocaleString()}
+														</span>
+													</div>
+													{analysisData.recommendations.cashManagement.bufferRemaining !== undefined && (
+														<div className="flex justify-between items-center pb-3 border-b">
+															<span className="text-gray-600">Above Buffer</span>
+															<span className="font-semibold">
+																${Math.round(analysisData.recommendations.cashManagement.bufferRemaining).toLocaleString()}
+															</span>
+														</div>
+													)}
+													<div className="mt-4 p-3 bg-blue-50 rounded">
+														<p className="text-sm">{analysisData.recommendations.cashManagement.recommendation}</p>
+													</div>
+												</div>
+											)}
+										</CardContent>
+									</Card>
+
+									{/* Action Plan */}
+									<Card>
+										<CardHeader>
+											<CardTitle>Action Plan</CardTitle>
+											<CardDescription>
+												What to do and when
+											</CardDescription>
+										</CardHeader>
+										<CardContent>
+											{analysisData.recommendations.actionPlan && (
+												<div className="space-y-4">
+													<div>
+														<h4 className="font-medium text-gray-700 mb-2">Before Open</h4>
+														<ul className="space-y-1">
+															{analysisData.recommendations.actionPlan.beforeOpen?.map((action, idx) => (
+																<li key={idx} className="text-sm text-gray-600 flex items-start">
+																	<span className="mr-2">•</span>
+																	<span>{action}</span>
+																</li>
+															))}
+														</ul>
+													</div>
+													
+													<div>
+														<h4 className="font-medium text-gray-700 mb-2">During Hours</h4>
+														<ul className="space-y-1">
+															{analysisData.recommendations.actionPlan.duringHours?.map((action, idx) => (
+																<li key={idx} className="text-sm text-gray-600 flex items-start">
+																	<span className="mr-2">•</span>
+																	<span>{action}</span>
+																</li>
+															))}
+														</ul>
+													</div>
+													
+													<div>
+														<h4 className="font-medium text-gray-700 mb-2">End of Day</h4>
+														<ul className="space-y-1">
+															{analysisData.recommendations.actionPlan.endOfDay?.map((action, idx) => (
+																<li key={idx} className="text-sm text-gray-600 flex items-start">
+																	<span className="mr-2">•</span>
+																	<span>{action}</span>
+																</li>
+															))}
+														</ul>
+													</div>
+												</div>
+											)}
+										</CardContent>
+									</Card>
+
+									{/* Plain English Summary */}
+									<Card>
+										<CardHeader>
+											<CardTitle>Summary</CardTitle>
+											<CardDescription>
+												Plain English overview
+											</CardDescription>
+										</CardHeader>
+										<CardContent>
+											{analysisData.recommendations.plainEnglishSummary && (
+												<div className="space-y-4">
+													<div>
+														<p className="text-sm font-medium text-gray-700">Current Situation</p>
+														<p className="text-sm text-gray-600 mt-1">
+															{analysisData.recommendations.plainEnglishSummary.currentSituation}
+														</p>
+													</div>
+													
+													<div>
+														<p className="text-sm font-medium text-gray-700">Immediate Actions</p>
+														<ul className="mt-1 space-y-1">
+															{analysisData.recommendations.plainEnglishSummary.immediateActions?.map((action, idx) => (
+																<li key={idx} className="text-sm text-gray-600 flex items-start">
+																	<span className="mr-2">•</span>
+																	<span>{action}</span>
+																</li>
+															))}
+														</ul>
+													</div>
+													
+													<div>
+														<p className="text-sm font-medium text-gray-700">What to Watch</p>
+														<ul className="mt-1 space-y-1">
+															{analysisData.recommendations.plainEnglishSummary.monitoringPoints?.map((point, idx) => (
+																<li key={idx} className="text-sm text-gray-600 flex items-start">
+																	<span className="mr-2">•</span>
+																	<span>{point}</span>
+																</li>
+															))}
+														</ul>
+													</div>
+													
+													<div className="pt-3 border-t">
+														<p className="text-sm text-gray-600">
+															<span className="font-medium">Next Review:</span> {analysisData.recommendations.plainEnglishSummary.nextReview}
+														</p>
+													</div>
+												</div>
+											)}
+										</CardContent>
+									</Card>
+								</>
+							) : (
+								<Card>
+									<CardContent className="py-8">
+										<p className="text-center text-gray-500">
+											Recommendations will appear here once analysis completes.
+										</p>
+									</CardContent>
+								</Card>
+							)}
 						</TabsContent>
 
 						{/* Continuation Plan Tab Content */}

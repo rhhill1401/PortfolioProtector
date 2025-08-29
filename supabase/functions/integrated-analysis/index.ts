@@ -118,6 +118,31 @@ Deno.serve(async (req) => {
   if (!ticker) return json({ success: false, error: "ticker required" }, 400);
   if (!OPENAI_API_KEY)
     return json({ success: false, error: "Missing OpenAI key" }, 500);
+  
+  // 🔍 FILTER PORTFOLIO FOR CURRENT TICKER ONLY
+  // This prevents issues when portfolio has multiple tickers (NVDA, etc)
+  if (portfolio) {
+    // Filter stock positions to only the requested ticker
+    if (portfolio.positions) {
+      const originalCount = portfolio.positions.length;
+      portfolio.positions = portfolio.positions.filter(p => 
+        p.symbol === ticker || p.symbol?.toUpperCase() === ticker.toUpperCase()
+      );
+      console.log(`📊 Filtered positions: ${originalCount} -> ${portfolio.positions.length} (ticker: ${ticker})`);
+    }
+    
+    // Filter option positions to only the requested ticker
+    if (portfolio.metadata?.optionPositions) {
+      const originalOptCount = portfolio.metadata.optionPositions.length;
+      portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.filter(opt => {
+        const symbol = (opt.symbol || '').toUpperCase();
+        const tickerUpper = ticker.toUpperCase();
+        // Match exact ticker or ticker with space (like "IBIT 63 Call")
+        return symbol === tickerUpper || symbol.startsWith(tickerUpper + ' ');
+      });
+      console.log(`📊 Filtered options: ${originalOptCount} -> ${portfolio.metadata.optionPositions.length} (ticker: ${ticker})`);
+    }
+  }
 
   // Extract key levels with proper formatting
   const keyLevels = (chartMetrics as ChartMetric[])
@@ -143,6 +168,18 @@ Deno.serve(async (req) => {
     ? rawPurchase 
     : currentPrice; // Use current price as fallback when purchase price is "Unknown" or invalid
   
+  // 💰 EXTRACT CASH BALANCE
+  // Check if portfolio has cashBalance directly (from portfolio-vision)
+  const cashBalance = portfolio?.cashBalance || 0; // No default - use actual value from portfolio
+  const stockValue = currentShares * currentPrice;
+  const totalValue = portfolio?.totalValue || (cashBalance + stockValue);
+  console.log('💰 [CASH BALANCE]:', { 
+    cashFromPortfolio: portfolio?.cashBalance,
+    cashBalance,
+    stockValue, 
+    totalValue 
+  });
+  
   // 📊 EXTRACT ACTUAL OPTION POSITIONS from portfolio metadata
   
   /** ───────── OPTION METRICS PRE-COMPUTE ───────── */
@@ -156,28 +193,46 @@ Deno.serve(async (req) => {
   }
   
   function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number, greeks?: OptionQuote): CalculatedOption {
-    const prem = Number(opt.premiumCollected) || 0;
-    const cur  = Number(opt.currentValue)     || 0;
+    // Handle premium - could be per-share or total depending on source
+    let prem = Number(opt.premiumCollected) || 0;
     const cnt  = Math.abs(Number(opt.contracts) || 1);
+    
+    // If premium seems too small (< $100), it's likely per-share and needs conversion
+    if (prem > 0 && prem < 100) {
+      prem = prem * 100 * cnt; // Convert per-share to total premium
+      console.log(`📊 Converted premium from per-share $${(prem / (100 * cnt)).toFixed(2)} to total $${prem.toFixed(2)}`);
+    }
+    
+    const cur  = Number(opt.currentValue) || 0;
     const strike = Number(opt.strike) || 0;
     const isCall = opt.optionType === 'CALL';
     
-    const pl = opt.position === 'SHORT' ? prem - cur : cur - prem;
+    // For wheel strategy, we keep the premium collected
+    const pl = prem;  // Premium collected is our profit
+    
+    // Assignment profit if shares get called away
+    const assignmentProfit = isCall 
+      ? (strike - costBasis) * 100 * cnt
+      : 0;  // For puts, we'd be buying shares
+    
+    // Total wheel profit = premium + profit from shares if assigned
+    const totalWheelProfit = prem + assignmentProfit;
+    
+    // MTM for display (what it would cost to buy back)
+    const mtm = prem - cur;
+    
+    // NEW FIELDS as specified:
+    const markToMarketPnl = (prem - cur) * (Number(opt.contracts) < 0 ? 1 : -1); // buy-to-close TODAY
+    const wheelFinalPnl = prem + assignmentProfit;                               // wheel outcome AT expiry
     
     // Percent return on capital at risk
-    const capital = opt.position === 'SHORT' ? Math.abs(prem) : Math.abs(prem);
-    const ret = capital > 0 ? (pl / capital) * 100 : 0;
+    const capital = costBasis * 100 * cnt;  // Capital tied up in shares
+    const ret = capital > 0 ? (totalWheelProfit / capital) * 100 : 0;
     
     const intrinsic = isCall 
       ? Math.max(0, spotPrice - strike) * 100 * cnt
       : Math.max(0, strike - spotPrice) * 100 * cnt;
     const extrinsic = Math.max(0, cur - intrinsic);
-    
-    const optionMTM = opt.position === 'SHORT' ? prem - cur : cur - prem;
-    const shareGain = isCall 
-      ? (strike - costBasis) * 100 * cnt
-      : (costBasis - strike) * 100 * cnt;
-    const wheelNet = shareGain + prem;
     
     // Add Greeks if available
     const delta = greeks?.delta as number | null || null;
@@ -192,8 +247,11 @@ Deno.serve(async (req) => {
       cycleReturn: Number(ret.toFixed(2)),
       intrinsic: Math.round(intrinsic),
       extrinsic: Math.round(extrinsic),
-      optionMTM: Math.round(optionMTM),
-      wheelNet: Math.round(wheelNet),
+      optionMTM: Math.round(mtm),
+      wheelNet: Math.round(totalWheelProfit),
+      assignmentProfit: Math.round(assignmentProfit),
+      markPnl: Math.round(markToMarketPnl),    // NEW ➜ "P/L if I buy back now"
+      wheelPnl: Math.round(wheelFinalPnl),      // NEW ➜ "P/L if it expires/assigns"
       delta,
       gamma,
       theta,
@@ -237,6 +295,11 @@ Deno.serve(async (req) => {
   const totalContracts = currentOptionPositions.reduce((total: number, opt: Record<string, unknown>) => {
     return total + Math.abs(Number(opt.contracts) || 0);
   }, 0);
+  
+  // Portfolio-level math (NEW)
+  const stockUnreal = (currentPrice - costBasis) * currentShares;
+  const totalMarkPnl = currentOptionPositions.reduce((t: number, o: Record<string, unknown>) => t + (o.markPnl as number || 0), 0);
+  const totalWheelPnl = currentOptionPositions.reduce((t: number, o: Record<string, unknown>) => t + (o.wheelPnl as number || 0), 0);
   
   console.log('🔍 [WHEEL ANALYSIS] Portfolio analysis:', {
     ticker,
@@ -384,6 +447,8 @@ Return this JSON structure:
         "extrinsic": ${position.extrinsic || 0},
         "optionMTM": ${position.optionMTM || 0},
         "wheelNet": ${position.wheelNet || 0},
+        "markPnl": ${position.markPnl || 0},
+        "wheelPnl": ${position.wheelPnl || 0},
         "delta": ${position.delta !== null ? position.delta : null},
         "gamma": ${position.gamma !== null ? position.gamma : null},
         "theta": ${position.theta !== null ? position.theta : null},
@@ -408,7 +473,9 @@ Return this JSON structure:
   "summary": {
     "currentPrice": ${currentPrice},
     "wheelPhase": "${wheelPhase}",
-    "overallAssessment": "${currentOptionPositions.length > 0 ? 'Analysis of actual option positions performance' : 'Wheel strategy recommendations for new positions'}"
+    "overallAssessment": "${currentOptionPositions.length > 0 ? 'Analysis of actual option positions performance' : 'Wheel strategy recommendations for new positions'}",
+    "netMarkToMarket": ${Math.round(stockUnreal + totalMarkPnl + totalPremiumCollected)},
+    "netWheelOutcome": ${Math.round(stockUnreal + totalWheelPnl)}
   },
   "recommendation": [
     {"name": "${hasPosition ? 'Sell Calls' : 'Sell Puts'}", "value": 7},
@@ -442,7 +509,151 @@ Return this JSON structure:
   "actionPlan": [
     "Specific wheel strategy action using provided prices only"
   ],
-  "optionsStrategy": "Describe specific ${hasPosition ? 'covered call' : 'cash-secured put'} recommendation"
+  "optionsStrategy": "Describe specific ${hasPosition ? 'covered call' : 'cash-secured put'} recommendation",
+  "recommendations": {
+    "positionSnapshot": [
+      {
+        "type": "Cash",
+        "ticker": "",
+        "quantity": 1,
+        "strike": 0,
+        "expiry": "",
+        "basis": ${cashBalance},
+        "currentValue": ${cashBalance},
+        "pl": 0,
+        "daysToExpiry": 0,
+        "moneyness": "",
+        "comment": "${cashBalance >= 6000 ? 'Above $6k buffer ✓' : 'Below $6k minimum buffer'}"
+      },
+      ${hasPosition ? `{
+        "type": "Shares",
+        "ticker": "${ticker}",
+        "quantity": ${currentShares},
+        "strike": 0,
+        "expiry": "",
+        "basis": ${costBasis},
+        "currentValue": ${currentPrice * currentShares},
+        "pl": ${(currentPrice - costBasis) * currentShares},
+        "daysToExpiry": 0,
+        "moneyness": "",
+        "comment": "Core wheel inventory"
+      },` : ''}
+      ${trimmedPositions.map((opt: unknown) => {
+        const position = opt as Record<string, unknown>;
+        return `{
+        "type": "Covered Call",
+        "ticker": "${position.symbol || ticker}",
+        "quantity": ${Number(position.contracts) || 0},
+        "strike": ${position.strike || 0},
+        "expiry": "${position.expiry || 'Unknown'}",
+        "premiumCollected": ${position.premiumCollected || 0},
+        "currentValue": ${position.currentValue || 0},
+        "wheelProfit": ${position.wheelNet || position.premiumCollected || 0},
+        "daysToExpiry": ${position.daysToExpiry || 0},
+        "moneyness": "${currentPrice > (position.strike as number || 0) ? 'ITM' : 'OTM'} ${Math.abs(((currentPrice - (position.strike as number || 0)) / (position.strike as number || 1)) * 100).toFixed(1)}%",
+        "assignmentGain": ${position.assignmentProfit || ((Number(position.strike) - costBasis) * 100 * Math.abs(Number(position.contracts))) || 0},
+        "comment": "${(position.daysToExpiry as number || 0) > 365 ? 'Long-dated' : 'Short-dated'}"
+      }`;
+      }).join(',\n      ')}
+    ],
+    "rollAnalysis": [
+      ${trimmedPositions.map((opt: unknown) => {
+        const position = opt as Record<string, unknown>;
+        const strike = position.strike as number || 0;
+        const priceThreshold = strike * 1.08;
+        const deltaThreshold = 0.80;
+        const currentDelta = position.delta as number || null;
+        const moneyness = ((currentPrice - strike) / strike) * 100;
+        
+        return `{
+        "position": "$${strike} ${position.optionType || 'CALL'} ${position.expiry}",
+        "currentDelta": ${currentDelta !== null ? currentDelta : '"Estimate from moneyness"'},
+        "moneyness": ${moneyness.toFixed(2)},
+        "ruleA": {
+          "triggered": ${currentPrice >= priceThreshold},
+          "threshold": ${priceThreshold.toFixed(2)},
+          "current": ${currentPrice.toFixed(2)},
+          "detail": "Price ${currentPrice >= priceThreshold ? '≥' : '<'} strike × 1.08 ($${priceThreshold.toFixed(2)})"
+        },
+        "ruleB": {
+          "triggered": ${currentDelta !== null ? currentDelta >= deltaThreshold : moneyness > 5},
+          "threshold": ${deltaThreshold},
+          "current": ${currentDelta !== null ? currentDelta : '"See moneyness"'},
+          "detail": "Delta ${currentDelta !== null ? (currentDelta >= deltaThreshold ? '≥' : '<') : 'estimated from'} 0.80"
+        },
+        "action": "${
+          currentPrice >= priceThreshold || (currentDelta !== null ? currentDelta >= deltaThreshold : moneyness > 5) 
+            ? 'ROLL' 
+            : position.daysToExpiry as number <= 5 
+              ? 'LET_EXPIRE' 
+              : 'HOLD'
+        }",
+        "conditionalTrigger": ${
+          currentPrice >= priceThreshold || (currentDelta !== null ? currentDelta >= deltaThreshold : moneyness > 5)
+            ? '"Roll immediately"'
+            : position.daysToExpiry as number <= 5
+              ? '"Let expire on ' + position.expiry + '"'
+              : '"If ' + ticker + ' closes ≥ $' + priceThreshold.toFixed(2) + ' or delta ≥ 0.80"'
+        },
+        "recommendation": "Provide specific plain-English action"
+      }`;
+      }).join(',\n      ')}
+    ],
+    "cashManagement": {
+      "currentCash": ${cashBalance},
+      "minimumRequired": 6000,
+      "availableForTrades": ${cashBalance},
+      "bufferRemaining": ${Math.max(0, cashBalance - 6000)},
+      "maxPutStrike": ${Math.floor(cashBalance / 100)},
+      "recommendation": "${
+        cashBalance >= 10000 
+          ? 'Sufficient cash to sell 1 put at $' + Math.floor(cashBalance / 100) + ' strike'
+          : cashBalance >= 6000
+            ? 'Cash available but consider keeping buffer'
+            : 'Below minimum $6k buffer'
+      }"
+    },
+    "actionPlan": {
+      "beforeOpen": [
+        ${currentOptionPositions.length > 0 
+          ? '"Check pre-market price vs roll triggers"' 
+          : '"Review option chain for ' + ticker + '"'
+        },
+        "Verify cash buffer remains above $6,000"
+      ],
+      "duringHours": [
+        ${trimmedPositions.filter((opt: unknown) => {
+          const position = opt as Record<string, unknown>;
+          const strike = position.strike as number || 0;
+          return currentPrice >= strike * 1.08;
+        }).length > 0
+          ? '"Execute rolls for positions meeting criteria"'
+          : '"Monitor price action vs strike + 8% levels"'
+        },
+        "Watch for delta approaching 0.80 threshold"
+      ],
+      "endOfDay": [
+        "Review closing price vs all triggers",
+        ${trimmedPositions.some((opt: unknown) => {
+          const position = opt as Record<string, unknown>;
+          return (position.daysToExpiry as number || 0) <= 1;
+        })
+          ? '"Prepare for tomorrow\'s expiration"'
+          : '"Set alerts for tomorrow\'s trigger prices"'
+        }
+      ]
+    },
+    "plainEnglishSummary": {
+      "currentSituation": "Describe portfolio state in one sentence",
+      "immediateActions": [
+        "List 1-3 specific actions to take now"
+      ],
+      "monitoringPoints": [
+        "What to watch for today/tomorrow"
+      ],
+      "nextReview": "When to check positions again"
+    }
+  }
 }`;
 
   /* ---------- OpenAI call ---------- */
@@ -456,67 +667,115 @@ Return this JSON structure:
       body: JSON.stringify({
         model: "gpt-4o",
         temperature: 0.2, // Lower temperature for more consistent output
-        max_tokens: 2000, // Increased for complete response
+        max_tokens: 8000, // Increased for large portfolios with many options
         messages: [
           { 
             role: "system", 
-            content: "You are an options-wheel strategist. Output ONLY valid JSON using EXACT prices provided. Never invent prices." 
+            content: `You are an elite options-wheel strategist and plain-English coach. 
+Output ONLY valid JSON using EXACT prices provided. Never invent prices.
+For each optionPosition also output:
+- "markPnl": profit/loss if I buy-to-close right now  
+- "wheelPnl": profit if I let it go to expiry/assignment
+Add to summary:
+- "netMarkToMarket": total P/L today (stock + options mark)
+- "netWheelOutcome": projected P/L if all short calls assign/expire
+For the recommendations section:
+- Fill in the plainEnglishSummary with clear, actionable language
+- Provide specific recommendations in rollAnalysis for each position
+- Use everyday language, no jargon unless explained
+- Focus on what to DO, not theory` 
           },
           { role: "user", content: prompt },
         ],
       }),
     });
 
+    if (!ai.ok) {
+      const errorText = await ai.text();
+      console.error('❌ OpenAI API error:', ai.status, errorText);
+      throw new Error(`OpenAI API error: ${ai.status} - ${errorText.substring(0, 200)}`);
+    }
+    
     const aiJson = await ai.json();
-    if (!ai.ok) throw new Error(aiJson.error?.message || "OpenAI error");
-
+    
     /* --- Extract JSON --- */
     let txt: string = aiJson.choices?.[0]?.message?.content ?? "";
     
-    // Log raw o3 response for debugging
-    console.log('🔍 [O3 RAW RESPONSE LENGTH]:', txt.length);
-    console.log('🔍 [O3 RAW RESPONSE START]:', txt.substring(0, 1000));
-    console.log('🔍 [O3 RAW RESPONSE END]:', txt.substring(txt.length - 500));
+    if (!txt) {
+      console.error('❌ Empty response from OpenAI');
+      console.error('Full response:', JSON.stringify(aiJson));
+      throw new Error("Empty response from OpenAI");
+    }
     
-    // Clean up response
+    // Log raw response for debugging
+    console.log('🔍 [AI RAW RESPONSE LENGTH]:', txt.length);
+    
+    // First, try to remove markdown code blocks if present
+    if (txt.includes("```")) {
+      txt = txt
+        .replace(/^[\s\S]*?```(?:json)?\s*/i, "") // Remove everything before first code block
+        .replace(/\s*```[\s\S]*$/i, "")            // Remove everything after last code block
+        .trim();
+    }
+    
+    // Now find the JSON object boundaries
     const first = txt.indexOf("{");
     const last = txt.lastIndexOf("}");
-    console.log('🔍 [O3 JSON BOUNDS]:', { first, last, hasValidBounds: first !== -1 && last !== -1 && last > first });
+    
+    console.log('🔍 [JSON BOUNDS]:', { first, last, textLength: txt.length });
     
     if (first !== -1 && last !== -1 && last > first) {
       txt = txt.slice(first, last + 1);
+    } else {
+      console.error('❌ [JSON EXTRACTION] Could not find valid JSON boundaries');
+      console.error('First 500 chars:', txt.substring(0, 500));
+      console.error('Last 500 chars:', txt.substring(txt.length - 500));
+      throw new Error("Could not extract JSON from AI response");
     }
-    
-    // Remove any markdown or code blocks
-    txt = txt
-      .replace(/^\s*```(?:json)?/i, "")
-      .replace(/```+\s*$/i, "")
-      .trim();
 
-      console.log('🔍 [O3 CLEANED TEXT LENGTH]:', txt.length);
-      console.log('🔍 [O3 CLEANED TEXT PREVIEW]:', txt.substring(0, 200));
+    console.log('🔍 [CLEANED TEXT LENGTH]:', txt.length);
+    console.log('🔍 [CLEANED TEXT PREVIEW]:', txt.substring(0, 200));
 
-      let analysis;
-      try {
-        analysis = JSON.parse(txt);
+    let analysis;
+    try {
+      // Try to parse the cleaned text
+      analysis = JSON.parse(txt);
         
-        // 🎯 WHEEL STRATEGY RESPONSE LOGGING
-        console.log('🎯 [WHEEL RESPONSE DEBUG] AI Generated:', {
-          wheelPhase: analysis.wheelStrategy?.currentPhase,
-          currentPositions: analysis.wheelStrategy?.currentPositions,
-          wheelPerformance: analysis.wheelStrategy?.wheelPerformance,
-          assignmentAnalysis: analysis.wheelStrategy?.assignmentAnalysis,
-          cycleReturn: analysis.wheelStrategy?.currentPositions?.[0]?.cycleReturn,
-          optionsStrategy: analysis.optionsStrategy,
-          overallAssessment: analysis.summary?.overallAssessment,
-          keyMessage: analysis.summary?.keyMessage
-        });
+      // 🎯 WHEEL STRATEGY RESPONSE LOGGING
+      console.log('🎯 [WHEEL RESPONSE DEBUG] AI Generated:', {
+        wheelPhase: analysis.wheelStrategy?.currentPhase,
+        currentPositions: analysis.wheelStrategy?.currentPositions,
+        wheelPerformance: analysis.wheelStrategy?.wheelPerformance,
+        assignmentAnalysis: analysis.wheelStrategy?.assignmentAnalysis,
+        cycleReturn: analysis.wheelStrategy?.currentPositions?.[0]?.cycleReturn,
+        optionsStrategy: analysis.optionsStrategy,
+        overallAssessment: analysis.summary?.overallAssessment,
+        keyMessage: analysis.summary?.keyMessage
+      });
         
-      } catch (err) {
-        console.error("Failed to parse AI response:", txt);
-        console.error("Parse error details:", err);
-        throw new Error("Invalid JSON response from AI");
+    } catch (err) {
+      console.error("Failed to parse AI response as JSON");
+      console.error("Parse error:", err.message);
+      console.error("Text length:", txt.length);
+      console.error("First 200 chars:", txt.substring(0, 200));
+      console.error("Last 200 chars:", txt.substring(txt.length - 200));
+      
+      // Try to fix common issues
+      if (txt.includes('"') && txt.includes('{')) {
+        // Try removing any trailing commas before closing braces
+        txt = txt.replace(/,(\s*[}\]])/g, '$1');
+        
+        try {
+          analysis = JSON.parse(txt);
+          console.log("Successfully parsed after fixing trailing commas");
+        } catch (err2) {
+          console.error("Still failed after comma fix:", err2.message);
+          throw new Error("Invalid JSON response from AI - response too long or malformed");
+        }
+      } else {
+        throw new Error("Invalid JSON response from AI - no JSON structure found");
       }
+    }
 
       /* ───────── Numeric validator DISABLED ───────── */
       // TEMPORARILY DISABLED: The validator is too aggressive and catches

@@ -71,16 +71,18 @@ Deno.serve(async (req) => {
 
 CRITICAL REQUIREMENTS:
 1. Return ONLY valid JSON - no other text
-2. Extract ALL visible positions: STOCKS AND OPTIONS
+2. Extract ALL visible positions: CASH, STOCKS AND OPTIONS
 3. If you cannot read exact values, use "Unknown" - never guess
-4. Focus on extracting: Stocks, Sold Options (Calls/Puts), Option details (Strike, Expiry, Premium)
+4. Focus on extracting: Cash Balance, Stocks, Sold Options (Calls/Puts), Option details (Strike, Expiry, Premium)
 5. Look for common brokerage interfaces (Robinhood, TD Ameritrade, E*TRADE, Schwab, etc.)
-6. PAY SPECIAL ATTENTION TO OPTIONS: Look for call/put contracts you've SOLD (short positions)
+6. PAY SPECIAL ATTENTION TO CASH: Look for "Cash", "Money Market", "Cash Balance" entries
+7. PAY SPECIAL ATTENTION TO OPTIONS: Look for call/put contracts you've SOLD (short positions)
 
 Your response must be valid JSON matching this EXACT structure:
 {
   "portfolioDetected": true,
   "brokerageType": "Robinhood",
+  "cashBalance": 10589.30,
   "positions": [
     {
       "symbol": "AAPL",
@@ -110,7 +112,7 @@ Your response must be valid JSON matching this EXACT structure:
       }
     ]
   },
-  "totalValue": 17525.00,
+  "totalValue": 28114.30,
   "extractionConfidence": "high",
   "extractionNotes": "All positions clearly visible"
 }
@@ -127,9 +129,14 @@ IMPORTANT:
               { type: "image_url", image_url: { url: image } },
               {
                 type: "text",
-                text: `Extract all portfolio position data from this image with SPECIAL FOCUS ON OPTIONS. 
+                text: `Extract all portfolio position data from this image with SPECIAL FOCUS ON CASH AND OPTIONS. 
                 
 PRIMARY FOCUS: Look for ${ticker} positions (both stocks AND options), but extract ALL visible positions.
+
+CRITICAL: Look for CASH BALANCE:
+- Look for rows labeled "Cash", "Money Market", "Cash Balance", or similar
+- Extract the exact dollar amount shown for cash
+- This is crucial for wheel strategy calculations
 
 CRITICAL: Look for OPTION positions you have SOLD (covered calls, cash-secured puts):
 - Option symbols (e.g., "IBIT 61C JUL19", "AAPL 150P DEC15")
@@ -241,6 +248,7 @@ Return ONLY valid JSON following the exact structure specified. No text before o
         portfolioDetected: portfolio.portfolioDetected,
         positionCount: portfolio.positions?.length || 0,
         optionPositionCount: portfolio.metadata?.optionPositions?.length || 0,
+        cashBalance: portfolio.cashBalance || 0,
         totalValue: portfolio.totalValue,
         confidence: portfolio.extractionConfidence,
         brokerageType: portfolio.brokerageType

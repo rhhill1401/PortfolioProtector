@@ -41,3 +41,6 @@ test-*.log
 *-e2e-test-*.json
 integrated-analysis-full-output.txt
 portfolio-vision-*.json
+
+# Documentation
+docs/

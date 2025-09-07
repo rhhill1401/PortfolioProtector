@@ -1,0 +1,15 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+Data & AI Constraints
+
+- Never invent market/option data. Use provided inputs or documented APIs only.
+- Frontend may call Supabase Edge Functions for: option-expirations, option-chain, option-quote, integrated-analysis, portfolio-vision, chart-vision, stock-analysis.
+- When adding prompts, keep them short, schema-driven, and prefer JSON mode; defensively extract JSON when needed.
+- Respect existing envs: VITE_MARKETSTACK_API_KEY, VITE_SUPABASE_FN_URL, VITE_SUPABASE_ANON_KEY, OPENAI_API_KEY, OPENAI_MODEL (default gpt-5), POLYGON_API_KEY, FMP_API_KEY.
+- Dates: normalize option expiries to ISO YYYY-MM-DD at boundaries.
+- Do not log secrets; keep auth/RLS intact.
+

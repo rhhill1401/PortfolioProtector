@@ -1,0 +1,101 @@
+---
+description: Project engineering, workflow, and UI rules for Portfolio Protector
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+Cursor Project Rule
+
+You are the engineering assistant for “Portfolio Protector,” a React 19 + Vite 6 + TypeScript 5.7 + Tailwind 4 app with Supabase Edge Functions (Deno). Follow these rules precisely.
+
+Role & Scope
+
+Act as a senior TypeScript/React engineer for this codebase only.
+
+Edit minimally, prefer diffs, and keep existing patterns intact.
+
+Output & Interaction
+
+Provide one small change at a time and wait for “Done” before continuing.
+
+Responses must be plain text, no tables, no images.
+
+Start fixes with a brief why, then show exact, paste-ready code or a unified diff for the smallest set of files touched.
+
+Include a tiny To-Do list with ✅ 🔄 ⏳ ❓ when useful.
+
+If something is ambiguous, ask one focused question and stop.
+
+Tech & Files
+
+Frontend: src/App.tsx, src/components/TickerPriceSearch.tsx, src/components/StockAnalysis.tsx
+
+Hooks: src/hooks/useOptionChain.ts, src/hooks/useWheelQuotes.ts
+
+Services: src/services/optionLookup.ts, src/services/greeksFetcher.ts, src/services/wheelMath.ts, src/services/wheelTimeAnalysis.ts
+
+Utils/Types: src/utils/portfolioParser.ts, src/types/*
+
+Edge Functions (Deno): supabase/functions/* including portfolio-vision, chart-vision, stock-analysis, option-expirations, option-chain, option-quote, integrated-analysis
+
+Coding Standards
+
+TypeScript only; no any. Prefer precise interfaces and discriminated unions.
+
+Small, single-responsibility React components; factor logic into hooks/services.
+
+DRY: share logic across services/hooks; avoid duplication across edge functions.
+
+Simplicity first: clear control flow, early returns, readable names.
+
+Error handling: never swallow errors; surface actionable messages.
+
+Validate inputs at I/O boundaries (UI props, request payloads in Edge Functions).
+
+Pure functions for domain math (wheelMath, wheelTimeAnalysis).
+
+Dates: normalize option expiries to ISO YYYY-MM-DD at boundaries.
+
+Performance: batch/parallelize when safe; cache via hooks/services with sensible TTLs.
+
+Linting: code must pass ESLint 9 + typescript-eslint and compile cleanly.
+
+Edge Function Structure
+
+- Keep `Deno.serve` handlers as thin orchestrators: preflight → validate → orchestrate helpers → respond.
+- Extract complex logic into small helpers: input parsing, portfolio filtering, prompt building, OpenAI call, and JSON extraction.
+- Enforce cyclomatic complexity ≤ 12 for handlers and helpers; do not disable the `complexity` rule—refactor instead.
+- Build prompts via dedicated functions; avoid giant template literals in the handler.
+- Encapsulate OpenAI response handling in `call*` + `extract*` helpers with defensive JSON cleanup.
+- Preserve existing logs and behavior when refactoring; no functional changes without explicit request.
+
+Workflow Expectations
+
+Propose the smallest viable change with a diff of specific files only.
+
+After each change, note what to run (e.g., typecheck/lint) but do not assume success.
+
+Do not refactor broadly unless explicitly asked; avoid over-engineering.
+
+UI Conventions
+
+Tailwind 4 and shadcn/radix components; clean, accessible markup.
+
+Keep state local where possible; derive with memoized selectors.
+
+Prefer small cards/tabs in StockAnalysis for new surface area.
+
+Security/Privacy
+
+Do not log secrets.
+
+Keep RLS/authorization assumptions intact; do not bypass Edge Function auth.
+
+Success Criteria
+
+Exact, paste-ready code that compiles cleanly.
+
+One incremental change per interaction.
+
+Clear rationale tied to the project’s Wheel strategy domain.

@@ -47,10 +47,11 @@ interface ExitStrategyPoint {
 }
 
 interface KeyLevel {
-	price: number;
-	type: 'Support' | 'Resistance' | 'Current';
-	significance: string;
-	description: string;
+    price: number;
+    type: 'Support' | 'Resistance' | 'Current';
+    significance: string;
+    description: string;
+    strength?: string; // from chart-vision
 }
 
 interface FundamentalMetric {
@@ -111,18 +112,36 @@ interface AnalysisDetail {
 }
 
 interface WheelPosition {
-	strike: number;
-	expiry: string;
-	type: 'Call' | 'Put';
-	contracts: number;
-	premium: number;
-	cycleReturn: string;
-	status: string;
-	assignmentProb: string;
-	nextAction: string;
-	daysToExpiry: number;
-	term: 'LONG_DATED' | 'SHORT_DATED';
-	position: 'SHORT' | 'LONG';
+    // Core
+    symbol?: string;
+    strike: number;
+    expiry: string;
+    type?: 'CALL' | 'PUT' | 'Call' | 'Put';
+    optionType?: 'CALL' | 'PUT';
+    contracts: number;
+    status: string;
+    position: 'SHORT' | 'LONG';
+    // Premiums/values
+    premium?: number;
+    premiumCollected?: number;
+    currentValue?: number;
+    cycleReturn?: string | number;
+    // Wheel P&L / MTM
+    wheelPnl?: number;
+    wheelNet?: number;
+    markPnl?: number;
+    optionMTM?: number;
+    // Greeks
+    delta?: number | null;
+    gamma?: number | null;
+    theta?: number | null;
+    iv?: number | null;
+    // Timing
+    daysToExpiry: number;
+    term: 'LONG_DATED' | 'SHORT_DATED';
+    // Guidance
+    assignmentProb: string;
+    nextAction: string;
 }
 
 interface WheelStrategy {
@@ -139,7 +158,7 @@ interface WheelStrategy {
 }
 
 interface StockAnalysisData {
-	summary: AnalysisSummary;
+    summary: AnalysisSummary;
 	opportunity?: string; // NEW – from integrated‑analysis
 	risk?: string; // already present but optional
 	detail?: AnalysisDetail; // NEW – nested detail object
@@ -153,11 +172,66 @@ interface StockAnalysisData {
 	keyLevels: KeyLevel[];
 	fundamentals: FundamentalMetric[];
 	vixImpact: VixImpact[];
-	recommendation: RecommendationDataPoint[];
-	confidence?: number;
-	additionalDataNeeded?: string;
-	wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
-	vix?: number; // VIX value for volatility display
+    recommendation: RecommendationDataPoint[];
+    confidence?: number;
+    additionalDataNeeded?: string;
+    wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
+    vix?: number; // VIX value for volatility display
+    // Optional nested recommendations object produced by integrated-analysis
+        recommendations?: {
+            positionSnapshot?: Array<{
+                type: string;
+                ticker?: string;
+                quantity?: number;
+                strike?: number;
+                expiry?: string;
+                basis?: number;
+                pl?: number;
+                premiumCollected?: number;
+                currentValue?: number;
+                wheelProfit?: number;
+                daysToExpiry?: number;
+                moneyness?: string;
+                comment?: string;
+            }>;
+        rollAnalysis?: Array<{
+            position: string;
+            currentDelta: number | string | null;
+            moneyness: number | string;
+            ruleA: { triggered: boolean; threshold: number; current: number; detail: string };
+            ruleB: { triggered: boolean; threshold: number; current: number | string; detail: string };
+            action: string;
+            conditionalTrigger: string;
+            recommendation: string;
+        }>;
+        cashManagement?: {
+            currentCash: number;
+            minimumRequired: number;
+            availableForTrades: number;
+            bufferRemaining?: number;
+            maxPutStrike?: number;
+            recommendation: string;
+        };
+        actionPlan?: {
+            beforeOpen?: string[];
+            duringHours?: string[];
+            endOfDay?: string[];
+        };
+        plainEnglishSummary?: {
+            currentSituation: string;
+            immediateActions?: string[];
+            monitoringPoints?: string[];
+            nextReview?: string;
+        };
+    };
+    // Optional chart metrics injected from frontend
+    chartMetrics?: Array<{
+        timeframe?: string;
+        keyLevels?: KeyLevel[];
+        trend?: string;
+        rsi?: string;
+        macd?: string;
+    }>;
 }
 
 
@@ -200,7 +274,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const wheelPositions = useMemo(() => {
 		if (!analysisData?.wheelStrategy?.currentPositions) return [];
 		
-		return analysisData.wheelStrategy.currentPositions.map(pos => {
+        return analysisData.wheelStrategy.currentPositions.map(pos => {
 			/**
 			 * Convert option expiry strings to Polygon's required YYYY-MM-DD format.
 			 *
@@ -240,16 +314,16 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			};
 			
 			// Map position ensuring we keep all fields including premium data
-			const mappedPosition = {
-				symbol: pos.symbol,
-				strike: pos.strike,
-				expiry: parseExpiry(pos.expiry),
-				type: (pos.optionType || pos.type || 'CALL') as 'CALL' | 'PUT',
-				contracts: pos.contracts,
-				// Include both possible premium field names
-				premium: pos.premium,
-				premiumCollected: pos.premiumCollected
-			};
+            const mappedPosition = {
+                symbol: pos.symbol ?? tickerSymbol,
+                strike: pos.strike,
+                expiry: parseExpiry(pos.expiry),
+                type: (pos.optionType || pos.type || 'CALL') as 'CALL' | 'PUT',
+                contracts: pos.contracts,
+                // Include both possible premium field names
+                premium: pos.premium,
+                premiumCollected: pos.premiumCollected
+            };
 			
 			console.log('[WHEEL POSITIONS] Mapped position:', mappedPosition);
 			return mappedPosition;
@@ -298,7 +372,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	}, [tickerSymbol]);
 
 	useEffect(() => {
-		const handler = (e: CustomEvent<{[key: string]: unknown}>) => {
+    const handler = (e: CustomEvent<StockAnalysisData & { wheelAnalysis?: WheelStrategy }>) => {
 			console.log('🔍 [AI RESPONSE DEBUG] Raw AI Response Received:', {
 				timestamp: new Date().toISOString(),
 				fullResponse: e.detail,
@@ -316,28 +390,28 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 					hasActionPlan: !!e.detail.actionPlan,
 					hasOptionsStrategy: !!e.detail.optionsStrategy,
 					hasWheelAnalysis: !!e.detail.wheelAnalysis,
-					hasDashboardMetrics: !!e.detail.dashboardMetrics,
+                // hasDashboardMetrics: !!(e.detail as any).dashboardMetrics,
 					allKeys: Object.keys(e.detail)
 				});
 				
-				// Log specific sections that might be wheel-related
-				if (e.detail.optionsStrategy) {
-					console.log('⚙️ [OPTIONS STRATEGY]', e.detail.optionsStrategy);
-				}
-				if (e.detail.recommendation) {
-					console.log('💡 [RECOMMENDATION]', e.detail.recommendation);
-				}
-				if (e.detail.actionPlan) {
-					console.log('📋 [ACTION PLAN]', e.detail.actionPlan);
-				}
-				if (e.detail.technicalFactors) {
-					console.log('📈 [TECHNICAL FACTORS]', e.detail.technicalFactors);
-				}
-			}
+        // Log specific sections that might be wheel-related
+        if (e.detail.optionsStrategy) {
+            console.log('⚙️ [OPTIONS STRATEGY]', e.detail.optionsStrategy);
+        }
+        if (e.detail.recommendation) {
+            console.log('💡 [RECOMMENDATION]', e.detail.recommendation);
+        }
+        if (e.detail.actionPlan) {
+            console.log('📋 [ACTION PLAN]', e.detail.actionPlan);
+        }
+        if (e.detail.technicalFactors) {
+            console.log('📈 [TECHNICAL FACTORS]', e.detail.technicalFactors);
+        }
+        }
 			
 			// 🎯 CRITICAL: Log the wheel strategy data when it arrives
 			// Note: The data comes as 'wheelAnalysis' from the edge function
-			const wheelData = e.detail.wheelAnalysis || e.detail.wheelStrategy;
+        const wheelData = (e.detail as any).wheelAnalysis || e.detail.wheelStrategy;
 			console.log('🚀🚀🚀 [WHEEL STRATEGY DATA RECEIVED]', {
 				timestamp: new Date().toISOString(),
 				hasWheelStrategy: !!wheelData,
@@ -347,37 +421,39 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			});
 
 			// 🔍 VERIFY: Does AI see your actual portfolio positions?
-			if (wheelData?.currentPositions && wheelData.currentPositions.length > 0) {
-				console.log('✅ [AI SEES YOUR POSITIONS]', {
-					positionCount: wheelData.currentPositions.length,
-					firstPosition: wheelData.currentPositions[0],
-					allStrikes: wheelData.currentPositions.map(p => p.strike),
-					allReturns: wheelData.currentPositions.map(p => p.cycleReturn),
-					wheelPhase: wheelData.currentPhase
-				});
-			} else {
-				console.log('❌ [AI DEFAULTING TO GENERIC] No specific positions found in AI response:', {
-					wheelAnalysis: e.detail.wheelAnalysis,
+        if (wheelData?.currentPositions && wheelData.currentPositions.length > 0) {
+            console.log('✅ [AI SEES YOUR POSITIONS]', {
+                positionCount: wheelData.currentPositions.length,
+                firstPosition: wheelData.currentPositions[0],
+                allStrikes: wheelData.currentPositions.map((p: any) => p.strike),
+                allReturns: wheelData.currentPositions.map((p: any) => p.cycleReturn),
+                wheelPhase: wheelData.currentPhase
+            });
+        } else {
+            console.log('❌ [AI DEFAULTING TO GENERIC] No specific positions found in AI response:', {
+                wheelAnalysis: e.detail.wheelAnalysis,
 					wheelStrategy: e.detail.wheelStrategy
 				});
 			}
 			
 			// Normalize the data structure - handle both wheelAnalysis and wheelStrategy
-			const normalizedData = {
-				...e.detail,
-				wheelStrategy: e.detail.wheelAnalysis || e.detail.wheelStrategy
-			};
+        const normalizedData = {
+            ...(e.detail as any),
+            wheelStrategy: (e.detail as any).wheelAnalysis || e.detail.wheelStrategy
+        } as StockAnalysisData;
 			
 			// Add error handling before setting state
 			try {
 				console.log('📊 [STOCK ANALYSIS] About to set analysis data:', normalizedData);
 				setAnalysisData(normalizedData); // fills tabs
 				console.log('✅ [STOCK ANALYSIS] Analysis data set successfully');
-			} catch (error) {
-				console.error('❌ [STOCK ANALYSIS] Error setting analysis data:', error);
-				console.error('Error stack:', error.stack);
-				console.error('Normalized data that caused error:', normalizedData);
-			}
+        } catch (error) {
+            console.error('❌ [STOCK ANALYSIS] Error setting analysis data:', error);
+            if (error instanceof Error) {
+                console.error('Error stack:', error.stack);
+            }
+            console.error('Normalized data that caused error:', normalizedData);
+        }
 		};
 		window.addEventListener('analysis-ready', handler as EventListener);
 		return () =>
@@ -748,14 +824,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 						<TabsContent
 							value='performance'
 							className='space-y-4'>
-							{/* DEBUG: Log wheel strategy data */}
-							{console.log('🎯 [PERFORMANCE TAB] Rendering with data:', {
-								hasAnalysisData: !!analysisData,
-								hasWheelStrategy: !!analysisData?.wheelStrategy,
-								wheelStrategy: analysisData?.wheelStrategy,
-								currentPhase: analysisData?.wheelStrategy?.currentPhase,
-								positions: analysisData?.wheelStrategy?.currentPositions
-							})}
+                        {/* Debug logging removed from JSX to satisfy ReactNode typing */}
 							
 							{analysisData?.wheelStrategy ? (
 								<>
@@ -838,7 +907,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<div>
 																	<span className="text-gray-600">Delta: </span>
 																	<span className="font-semibold">
-																		{position.delta !== null && position.delta !== undefined ? position.delta.toFixed(3) : 'N/A'}
+                  {position.delta !== null && position.delta !== undefined ? position.delta.toFixed(2) : 'N/A'}
 																	</span>
 																</div>
 																<div>
@@ -1082,9 +1151,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 													
 													// Calculate overall metrics
 													const goodQuotes = wheelQuotes.filter(q => q.success && q.quote);
-													const overallMetrics = goodQuotes.length > 0 
-														? calculateAggregateMetrics(positions, wheelQuotes)
-														: null;
+                                const overallMetrics = goodQuotes.length > 0 
+                                    ? calculateAggregateMetrics(
+                                        positions.map(p => ({
+                                            symbol: p.symbol || tickerSymbol,
+                                            strike: p.strike,
+                                            expiry: p.expiry,
+                                            type: (p.optionType || p.type || 'CALL') as 'CALL' | 'PUT',
+                                            contracts: p.contracts,
+                                            premium: p.premium ?? p.premiumCollected
+                                        })),
+                                        wheelQuotes
+                                      )
+                                    : null;
 													
 													const totalPremiumCollected = overallMetrics?.totalPremiumCollected || 0;
 													const totalCostToClose = overallMetrics?.totalCostToClose || 0;
@@ -1305,22 +1384,22 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<td className="py-2">{position.type}</td>
 																<td className="py-2">{position.ticker || '—'}</td>
 																<td className="text-right py-2">{position.quantity}</td>
-																<td className="text-right py-2">${Math.round(position.strike || position.basis).toLocaleString()}</td>
+                                        <td className="text-right py-2">${Math.round((position.strike ?? position.basis ?? 0)).toLocaleString()}</td>
 																<td className="text-right py-2">
-																	{position.type === 'Covered Call' && position.premiumCollected ? 
-																		`$${Math.round(position.premiumCollected).toLocaleString()}` : 
-																		`$${Math.round(position.currentValue).toLocaleString()}`
-																	}
+                                            {position.type === 'Covered Call' && position.premiumCollected !== undefined ? 
+                                                `$${Math.round(position.premiumCollected).toLocaleString()}` : 
+                                                `$${Math.round((position.currentValue ?? 0)).toLocaleString()}`
+                                            }
 																</td>
-																<td className={`text-right py-2 font-medium ${
-																	position.type === 'Covered Call' ? 'text-green-600' : 
-																	position.pl >= 0 ? 'text-green-600' : 'text-red-600'
-																}`}>
-																	{position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
-																		`$${Math.round(position.wheelProfit).toLocaleString()}` :
-																		position.type === 'Cash' ? '—' :
-																		position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
-																	}
+                                        <td className={`text-right py-2 font-medium ${
+                                            position.type === 'Covered Call' ? 'text-green-600' : 
+                                            (position.pl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                                        }`}>
+                                            {position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
+                                                `$${Math.round(position.wheelProfit).toLocaleString()}` :
+                                                position.type === 'Cash' ? '—' :
+                                                position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
+                                            }
 																</td>
 																<td className="py-2 text-xs text-gray-600 pl-4">{position.comment}</td>
 															</tr>
@@ -1602,10 +1681,10 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 												)
 											)}
 											{/* ---------- Added: visual S/R levels ---------- */}
-											{analysisData?.chartMetrics?.[0]
+                                        {analysisData?.chartMetrics?.[0]
 												?.keyLevels?.length ? (
-												analysisData.chartMetrics[0].keyLevels.map(
-													(lvl, idx) => (
+                                            analysisData.chartMetrics[0].keyLevels.map(
+                                                (lvl: KeyLevel, idx: number) => (
 														<tr key={idx}>
 															{/* Added: label shows Support / Resistance */}
 															<td className='py-1'>
@@ -1805,4 +1884,3 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		</div>
 	);
 }
-

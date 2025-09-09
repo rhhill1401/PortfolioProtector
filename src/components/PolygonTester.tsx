@@ -3,12 +3,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
 
+type OptionSide = 'CALL' | 'PUT';
+
 export function PolygonTester() {
-  const [testInput, setTestInput] = useState({
+  const [testInput, setTestInput] = useState<{
+    symbol: string;
+    strike: string;
+    expiry: string;
+    type: OptionSide;
+  }>({
     symbol: 'IBIT',
     strike: '61',
     expiry: 'Jul-18-2025', // Test with AI format
-    type: 'CALL' as const
+    type: 'CALL'
   });
 
   const [testPositions, setTestPositions] = useState<any[]>([]);
@@ -146,7 +153,7 @@ export function PolygonTester() {
                 <label className="block text-sm font-medium mb-1">Type</label>
                 <select
                   value={testInput.type}
-                  onChange={(e) => setTestInput({ ...testInput, type: e.target.value as 'CALL' | 'PUT' })}
+                  onChange={(e) => setTestInput({ ...testInput, type: e.target.value as OptionSide })}
                   className="w-full p-2 border rounded"
                 >
                   <option value="CALL">CALL</option>

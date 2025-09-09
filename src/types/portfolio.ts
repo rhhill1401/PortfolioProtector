@@ -16,6 +16,14 @@ export interface PortfolioPosition {
     totalValue?: number;
     errors: string[];
     warnings: string[];
+    metadata?: {
+      source?: string;
+      brokerageType?: string;
+      extractionConfidence?: string;
+      fileName?: string;
+      optionPositions?: any[];
+      [key: string]: any;
+    };
   }
   
   // Common CSV column mappings

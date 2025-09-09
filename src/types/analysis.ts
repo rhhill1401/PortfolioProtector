@@ -88,7 +88,7 @@ export interface AnalysisContext {
   readiness: AnalysisReadiness;
 }
 
-export type UploadCategory = 'ticker' | 'portfolio' | 'charts' | 'research';
+export type UploadCategory = 'portfolio' | 'charts' | 'research';
 
 /** A fresh UploadState where nothing has been provided yet */
 export const initialUploadState: UploadState = {

@@ -13,7 +13,7 @@ interface WheelPosition {
   premiumCollected?: number;
 }
 
-interface OptionQuote {
+export interface OptionQuote {
   ticker: string;
   strike: number;
   expiry: string;

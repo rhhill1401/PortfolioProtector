@@ -57,11 +57,87 @@ Deno.serve(async (req) => {
 
   /* ----------- OpenAI Vision call ----------- */
   try {
+  const MODEL = Deno.env.get("OPENAI_VISION_MODEL") ?? "gpt-5-mini";
+
+  let aiData: any;
+  let txt = "";
+
+  if (/^gpt-5/.test(MODEL)) {
+    const res = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        input: [
+          {
+            role: "system",
+            content: `You are a professional stock analyst analyzing charts. 
+ALWAYS return valid JSON even if the image is unclear. If you cannot determine exact values, use reasonable estimates or "Unknown".
+
+Return JSON matching this structure:
+{
+  "marketContext": string,
+  "technical": {
+    "trend": string,
+    "rsi": string,
+    "macd": string,
+    "movingAverages": string
+  },
+  "recommendation": [
+    { "name": "Buy", "value": number },
+    { "name": "Hold", "value": number },
+    { "name": "Sell", "value": number }
+  ],
+  "risk": string,
+  "keyLevels":[{ "price": number, "type":"Support|Resistance", "strength":"weak|medium|strong" }]
+}
+
+IMPORTANT: Never apologize or explain. Always return JSON even with limited information.`
+          },
+          {
+            role: "user",
+            content: [
+              { type: "input_image", image_url: { url: image } },
+              { type: "input_text", text: `Analyze this ${context} chart for ${ticker}.
+Current share price is $${priceContext.currentPrice ?? "Unknown"}.
+Timeframe ≈ ${priceContext.timeframe ?? "Unknown"}, covering ~${priceContext.rangeDays ?? "Unknown"} days.
+
+•  List any visible horizontal support or resistance lines as precise prices.
+•  If values are not clear, output "Unknown" (do NOT invent).
+
+Respond ONLY with JSON and include a "keyLevels" array like:
+"keyLevels":[{"price":143.5,"type":"Resistance","strength":"strong"}]` }
+            ]
+          }
+        ],
+        max_output_tokens: 800
+      })
+    });
+    aiData = await res.json();
+    if (!res.ok) throw new Error(aiData.error?.message || "OpenAI error");
+    if (typeof aiData.output_text === "string" && aiData.output_text.trim().length > 0) {
+      txt = aiData.output_text;
+    } else if (Array.isArray(aiData.output)) {
+      txt = (aiData.output || [])
+        .flatMap((item: any) =>
+          Array.isArray(item?.content)
+            ? item.content.map((c: any) => (typeof c?.text === "string" ? c.text : "")).filter(Boolean)
+            : []
+        )
+        .join("")
+        .trim();
+    } else {
+      txt = "";
+    }
+  } else {
     const aiResp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model: "gpt-4o",
@@ -71,27 +147,27 @@ Deno.serve(async (req) => {
           {
             role: "system",
             content: `You are a professional stock analyst analyzing charts. 
-        ALWAYS return valid JSON even if the image is unclear. If you cannot determine exact values, use reasonable estimates or "Unknown".
-        
-        Return JSON matching this structure:
-        {
-          "marketContext": string (describe overall market conditions visible),
-          "technical": {
-            "trend": string (upward/downward/sideways/unclear),
-            "rsi": string (number or "Not visible"),
-            "macd": string (bullish/bearish/neutral/Not visible),
-            "movingAverages": string (describe MA positions if visible)
-          },
-          "recommendation": [
-            { "name": "Buy", "value": number },
-            { "name": "Hold", "value": number },
-            { "name": "Sell", "value": number }
-          ],
-          "risk": string,
-"keyLevels":[{ "price": number, "type":"Support|Resistance", "strength":"weak|medium|strong" }]
-        }
-        
-        IMPORTANT: Never apologize or explain. Always return JSON even with limited information.`,
+ALWAYS return valid JSON even if the image is unclear. If you cannot determine exact values, use reasonable estimates or "Unknown".
+
+Return JSON matching this structure:
+{
+  "marketContext": string,
+  "technical": {
+    "trend": string,
+    "rsi": string,
+    "macd": string,
+    "movingAverages": string
+  },
+  "recommendation": [
+    { "name": "Buy", "value": number },
+    { "name": "Hold", "value": number },
+    { "name": "Sell", "value": number }
+  ],
+  "risk": string,
+  "keyLevels":[{ "price": number, "type":"Support|Resistance", "strength":"weak|medium|strong" }]
+}
+
+IMPORTANT: Never apologize or explain. Always return JSON even with limited information.`
           },
           {
             role: "user",
@@ -99,74 +175,53 @@ Deno.serve(async (req) => {
               { type: "image_url", image_url: { url: image } },
               {
                 type: "text",
-                text: `
-          Analyze this ${context} chart for ${ticker}.
-          Current share price is $${priceContext.currentPrice ?? "Unknown"}.
-          Timeframe ≈ ${priceContext.timeframe ?? "Unknown"}, covering ~${priceContext.rangeDays ?? "Unknown"} days.
-          
-          •  List any visible horizontal support or resistance lines as precise prices.
-          •  If values are not clear, output "Unknown" (do NOT invent).
-          
-          Remember, respond ONLY with JSON and include a "keyLevels" array like:
-          "keyLevels":[{"price":143.5,"type":"Resistance","strength":"strong"}]`,
-              },
-            ],
-          },
-        ],
-      }),
+                text: `Analyze this ${context} chart for ${ticker}.
+Current share price is $${priceContext.currentPrice ?? "Unknown"}.
+Timeframe ≈ ${priceContext.timeframe ?? "Unknown"}, covering ~${priceContext.rangeDays ?? "Unknown"} days.
+
+•  List any visible horizontal support or resistance lines as precise prices.
+•  If values are not clear, output "Unknown" (do NOT invent).
+
+Respond ONLY with JSON and include a "keyLevels" array like:
+"keyLevels":[{"price":143.5,"type":"Resistance","strength":"strong"}]`
+              }
+            ]
+          }
+        ]
+      })
     });
-
-    const aiData = await aiResp.json();
+    aiData = await aiResp.json();
     if (!aiResp.ok) throw new Error(aiData.error?.message || "OpenAI error");
-
-    /* -------- Extract JSON block from the reply -------- */
-    let txt: string = aiData.choices?.[0]?.message?.content ?? "";
-    const first = txt.indexOf("{");
-    const last = txt.lastIndexOf("}");
-    if (first !== -1 && last !== -1 && last > first) {
-      txt = txt.slice(first, last + 1);
-    }
-    txt = txt
-      .replace(/^\s*```(?:json)?/i, "")
-      .replace(/```+\s*$/i, "")
-      .trim();
-
-    /* ----- handle model apologies/refusals gracefully ----- */
-    if (
-      txt.toLowerCase().includes("sorry") ||
-      txt.toLowerCase().includes("apologize")
-    ) {
-      console.warn("AI returned apology – sending default analysis");
-      const defaultAnalysis = {
-        marketContext: "Unable to fully analyse chart",
-        technical: {
-          trend: "Unknown",
-          rsi: "Not visible",
-          macd: "Not visible",
-          movingAverages: "Not visible",
-        },
-        recommendation: [
-          { name: "Buy",  value: 0 },
-          { name: "Hold", value: 100 },
-          { name: "Sell", value: 0 },
-        ],
-        risk: "Unable to assess – insufficient chart data",
-      };
-      return jsonResponse({ success: true, analysis: defaultAnalysis });
-    }
-
-    try {
-      const analysis = JSON.parse(txt);
-      return jsonResponse({ success: true, analysis }, 200);
-    } catch {
-      // Malformed or non‑JSON response
-      return jsonResponse(
-        { success: false, error: "Model returned invalid JSON" },
-        200,
-      );
-    }
-  } catch (err) {
-    console.error("chart-vision:", err);
-    return jsonResponse({ success: false, error: String(err) }, 500);
+    txt = aiData.choices?.[0]?.message?.content ?? "";
   }
+
+  const first = txt.indexOf("{");
+  const last = txt.lastIndexOf("}");
+  let cleaned = txt;
+  if (first !== -1 && last !== -1 && last > first) cleaned = txt.slice(first, last + 1);
+  cleaned = cleaned.replace(/^\s*```(?:json)?/i, "").replace(/```+\s*$/i, "").trim();
+
+  if (
+    cleaned.toLowerCase().includes("sorry") ||
+    cleaned.toLowerCase().includes("apologize")
+  ) {
+    const defaultAnalysis = {
+      marketContext: "Unable to fully analyse chart",
+      technical: { trend: "Unknown", rsi: "Not visible", macd: "Not visible", movingAverages: "Not visible" },
+      recommendation: [{ name: "Buy", value: 0 }, { name: "Hold", value: 100 }, { name: "Sell", value: 0 }],
+      risk: "Unable to assess – insufficient chart data"
+    };
+    return jsonResponse({ success: true, analysis: defaultAnalysis });
+  }
+
+  try {
+    const analysis = JSON.parse(cleaned);
+    return jsonResponse({ success: true, analysis }, 200);
+  } catch {
+    return jsonResponse({ success: false, error: "Model returned invalid JSON" }, 200);
+  }
+} catch (err) {
+  console.error("chart-vision:", err);
+  return jsonResponse({ success: false, error: String(err) }, 500);
+}
 });

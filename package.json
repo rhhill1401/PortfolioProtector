@@ -7,8 +7,15 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "preview": "vite preview",
     "diagnose:analysis": "node tests/diag-integrated-analysis.js",
-    "preview": "vite preview"
+    "deploy:ia": "supabase functions deploy integrated-analysis --project-ref twnldqhqbybnmqbsgvpq --use-api",
+    "deploy:ia-v2": "supabase functions deploy integrated-analysis-v2 --project-ref twnldqhqbybnmqbsgvpq --use-api",
+    "deploy:chart": "supabase functions deploy chart-vision --project-ref twnldqhqbybnmqbsgvpq --use-api",
+    "deploy:portfolio": "supabase functions deploy portfolio-vision --project-ref twnldqhqbybnmqbsgvpq --use-api",
+    "deploy:options": "supabase functions deploy option-quote --project-ref twnldqhqbybnmqbsgvpq --use-api && supabase functions deploy option-chain --project-ref twnldqhqbybnmqbsgvpq --use-api && supabase functions deploy option-expirations --project-ref twnldqhqbybnmqbsgvpq --use-api",
+    "deploy:all": "npm run deploy:ia && npm run deploy:chart && npm run deploy:portfolio && npm run deploy:options",
+    "test:functions": "npm run diagnose:analysis"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.4",
@@ -30,6 +37,7 @@
     "@eslint/js": "^9.21.0",
     "@tailwindcss/vite": "^4.0.17",
     "@types/node": "^22.13.14",
+    "@types/papaparse": "^5.3.16",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",

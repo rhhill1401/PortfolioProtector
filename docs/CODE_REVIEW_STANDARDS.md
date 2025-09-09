@@ -18,6 +18,24 @@ Before writing ANY new code:
 - **No duplicate code** - extract common logic into utilities
 - **Modular components** - single responsibility principle
 - **Reusable patterns** - identify and use existing patterns
+- Coding standards (enforced for future work)
+
+1) TypeScript only; **no `any` types**. Prefer precise interfaces and discriminated unions.
+2) Keep components small and **modular**; one clear responsibility. Extract logic into services/hooks.
+3) **DRY**: Factor shared logic into helpers or services. Avoid duplication across components and edge functions.
+4) **Simplicity first**: Prefer straightforward control flow, early returns, and readable variable names. No cleverness.
+5) **Error handling**: Handle and surface failures clearly (API, parsing). Never swallow errors silently.
+6) **I/O boundaries**: Validate inputs at edges (request parsing in edge functions; props/types in UI).
+7) **Pure functions for domain math**: Keep calculation helpers side‑effect free (`wheelMath`, `wheelTimeAnalysis`).
+8) **Consistent date formats**: Use ISO `YYYY-MM-DD` for option expiries; add conversion where needed.
+9) **Performance**: Batch/parallelize network calls when safe; use caching with TTL in hooks/services.
+10) **Lint/format**: Code compiles without ESLint/type errors; match existing formatting and Tailwind usage.
+
+Backend and Supabase note
+
+- Keep Edge Functions and Supabase logic simple and purposeful (KISS).
+- Avoid over-engineering; follow DRY and reuse shared helpers/services where appropriate.
+- Validate inputs at I/O boundaries; surface clear errors; do not add unnecessary abstractions.
 
 ### 2. TypeScript Standards
 - **Strict types** - no `any` types unless absolutely necessary

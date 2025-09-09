@@ -13,6 +13,54 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5";
+
+async function callOpenAI(OPENAI_API_KEY: string, OPENAI_MODEL: string, prompt: string): Promise<Record<string, unknown>> {
+  const model = OPENAI_MODEL;
+  const systemPrompt =
+    "You are an elite options-wheel strategist and plain-English coach.\n" +
+    "Output ONLY valid JSON using EXACT prices provided. Never invent prices.\n" +
+    'For each optionPosition also output:\n- "markPnl": profit/loss if I buy-to-close right now\n- "wheelPnl": profit if I let it go to expiry/assignment\n' +
+    'Add to summary:\n- "netMarkToMarket": total P/L today (stock + options mark)\n- "netWheelOutcome": projected P/L if all short calls assign/expire\n' +
+    "For the recommendations section:\n- Fill in the plainEnglishSummary with clear, actionable language\n- Provide specific recommendations in rollAnalysis for each position\n- Use everyday language, no jargon unless explained\n- Focus on what to DO, not theory";
+
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      input: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt }
+      ],
+      max_output_tokens: 8000
+    })
+  });
+
+  const raw = await res.json();
+  if (!res.ok) throw new Error(raw?.error?.message ?? `OpenAI error ${res.status}`);
+
+  if (typeof raw.output_text === "string" && raw.output_text.trim().length > 0) {
+    return raw as Record<string, unknown>;
+  }
+
+  if (Array.isArray(raw.output)) {
+    const joined = (raw.output as Array<Record<string, unknown>>)
+      .flatMap((item: any) =>
+        Array.isArray(item?.content)
+          ? item.content.map((c: any) => (typeof c?.text === "string" ? c.text : "")).filter(Boolean)
+          : []
+      )
+      .join("")
+      .trim();
+    (raw as any).output_text = joined;
+    return raw as Record<string, unknown>;
+  }
+
+  (raw as any).output_text = "";
+  return raw as Record<string, unknown>;
+}
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -234,12 +282,12 @@ Deno.serve(async (req) => {
       : Math.max(0, strike - spotPrice) * 100 * cnt;
     const extrinsic = Math.max(0, cur - intrinsic);
     
-    // Return raw Greeks (leave display formatting to the UI)
-    const delta = greeks?.delta ?? null;
-    const gamma = greeks?.gamma ?? null;
-    const theta = greeks?.theta ?? null;
-    const vega  = greeks?.vega  ?? null;
-    const iv    = greeks?.iv    ?? null; // keep as fraction (0..1); UI will scale to %
+    // Add Greeks if available
+    const delta = greeks?.delta as number | null || null;
+    const gamma = greeks?.gamma as number | null || null;
+    const theta = greeks?.theta as number | null || null;
+    const vega = greeks?.vega as number | null || null;
+    const iv = greeks?.iv as number | null || null;
     
     return { 
       ...opt, 
@@ -260,32 +308,6 @@ Deno.serve(async (req) => {
     };
   }
   
-  // Helper functions for normalizing option keys
-  function toIsoDate(input: unknown): string {
-    if (!input) return "";
-    const s = String(input).trim();
-    // already ISO
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    // e.g., "Sep-30-2025" or "Sep 30, 2025"
-    const tryParsed = new Date(s.replace(/-/g, " ").replace(/,/g, ""));
-    if (!isNaN(tryParsed.getTime())) {
-      const y = tryParsed.getFullYear();
-      const m = String(tryParsed.getMonth() + 1).padStart(2, "0");
-      const d = String(tryParsed.getDate()).padStart(2, "0");
-      return `${y}-${m}-${d}`;
-    }
-    return s; // last resort
-  }
-
-  function normType(t: unknown): "CALL" | "PUT" {
-    return String(t).toUpperCase() === "PUT" ? "PUT" : "CALL";
-  }
-
-  function normStrike(v: unknown): string {
-    const n = Number(v);
-    return Number.isFinite(n) ? String(n) : String(v ?? "");
-  }
-
   // Debug: Log optionGreeks to see what we received
   console.log('🔍 [DEBUG] optionGreeks received:', {
     hasOptionGreeks: !!optionGreeks,
@@ -295,25 +317,19 @@ Deno.serve(async (req) => {
     firstValue: optionGreeks?.[Object.keys(optionGreeks || {})[0]]
   });
 
-  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, any>) => {
-    const symbol = String(opt.symbol || ticker).toUpperCase();
-    const strike = normStrike(opt.strike);
-    const expiryIso = toIsoDate(opt.expiry);
-    const type = normType(opt.optionType);
-
-    // primary key (ISO); also try raw for backward compatibility
-    const primaryKey = `${symbol}-${strike}-${expiryIso}-${type}`;
-    const rawKey = `${symbol}-${strike}-${String(opt.expiry || "")}-${type}`;
-
-    const positionGreeks =
-      (optionGreeks as Record<string, OptionQuote>)[primaryKey] ??
-      (optionGreeks as Record<string, OptionQuote>)[rawKey];
-
-    console.log("🔍 [DEBUG] Greeks lookup:", {
-      symbol, strike, expiryRaw: String(opt.expiry || ""), expiryIso, type,
-      primaryKey, rawKey, found: !!positionGreeks, delta: positionGreeks?.delta
+  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => {
+    // Get Greeks for this position if available
+    const positionKey = `${opt.symbol}-${opt.strike}-${opt.expiry}-${opt.optionType}`;
+    const positionGreeks = optionGreeks && optionGreeks[positionKey] as OptionQuote | undefined;
+    
+    // Debug: Log each position lookup
+    console.log(`🔍 [DEBUG] Looking up Greeks for position:`, {
+      position: `${opt.symbol} ${opt.strike} ${opt.expiry} ${opt.optionType}`,
+      positionKey,
+      greeksFound: !!positionGreeks,
+      delta: positionGreeks?.delta
     });
-
+    
     return calcOptionMetrics(opt, currentPrice, costBasis, positionGreeks);
   });
   const currentOptionPositions =
@@ -690,48 +706,10 @@ Return this JSON structure:
 
   /* ---------- OpenAI call ---------- */
   try {
-    const ai = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        temperature: 0.2, // Lower temperature for more consistent output
-        max_tokens: 8000, // Increased for large portfolios with many options
-        messages: [
-          { 
-            role: "system", 
-            content: `You are an elite options-wheel strategist and plain-English coach. 
-Output ONLY valid JSON using EXACT prices provided. Never invent prices.
-For each optionPosition also output:
-- "markPnl": profit/loss if I buy-to-close right now  
-- "wheelPnl": profit if I let it go to expiry/assignment
-Add to summary:
-- "netMarkToMarket": total P/L today (stock + options mark)
-- "netWheelOutcome": projected P/L if all short calls assign/expire
-For the recommendations section:
-- Fill in the plainEnglishSummary with clear, actionable language
-- Provide specific recommendations in rollAnalysis for each position
-- Use everyday language, no jargon unless explained
-- Focus on what to DO, not theory` 
-          },
-          { role: "user", content: prompt },
-        ],
-      }),
-    });
-
-    if (!ai.ok) {
-      const errorText = await ai.text();
-      console.error('❌ OpenAI API error:', ai.status, errorText);
-      throw new Error(`OpenAI API error: ${ai.status} - ${errorText.substring(0, 200)}`);
-    }
-    
-    const aiJson = await ai.json();
+    const aiJson = await callOpenAI(OPENAI_API_KEY, OPENAI_MODEL, prompt);
     
     /* --- Extract JSON --- */
-    let txt: string = aiJson.choices?.[0]?.message?.content ?? "";
+    let txt: string = (aiJson as any).output_text ?? "";
     
     if (!txt) {
       console.error('❌ Empty response from OpenAI');

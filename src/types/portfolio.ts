@@ -14,6 +14,7 @@ export interface PortfolioPosition {
     success: boolean;
     positions: PortfolioPosition[];
     totalValue?: number;
+    cashBalance?: number;
     errors: string[];
     warnings: string[];
     metadata?: {

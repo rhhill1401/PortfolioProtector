@@ -1380,48 +1380,74 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											</CardDescription>
 										</CardHeader>
 										<CardContent>
-											<div className="overflow-x-auto">
-												<table className="w-full text-sm">
-													<thead>
-														<tr className="border-b">
-															<th className="text-left py-2">Type</th>
-															<th className="text-left py-2">Symbol</th>
-															<th className="text-right py-2">Qty</th>
-															<th className="text-right py-2">Strike/Basis</th>
-															<th className="text-right py-2">Premium</th>
-															<th className="text-right py-2">Profit</th>
-															<th className="text-left py-2">Status</th>
-														</tr>
-													</thead>
-													<tbody>
-														{analysisData.recommendations.positionSnapshot?.map((position, idx) => (
-															<tr key={idx} className="border-b">
-																<td className="py-2">{position.type}</td>
-																<td className="py-2">{position.ticker || '—'}</td>
-																<td className="text-right py-2">{position.quantity}</td>
-                                        <td className="text-right py-2">${Math.round((position.strike ?? position.basis ?? 0)).toLocaleString()}</td>
-																<td className="text-right py-2">
-                                            {position.type === 'Covered Call' && position.premiumCollected !== undefined ? 
-                                                `$${Math.round(position.premiumCollected).toLocaleString()}` : 
-                                                `$${Math.round((position.currentValue ?? 0)).toLocaleString()}`
-                                            }
-																</td>
-                                        <td className={`text-right py-2 font-medium ${
-                                            position.type === 'Covered Call' ? 'text-green-600' : 
-                                            (position.pl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                                        }`}>
-                                            {position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
-                                                `$${Math.round(position.wheelProfit).toLocaleString()}` :
-                                                position.type === 'Cash' ? '—' :
-                                                position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
-                                            }
-																</td>
-																<td className="py-2 text-xs text-gray-600 pl-4">{position.comment}</td>
-															</tr>
-														))}
-													</tbody>
-												</table>
-											</div>
+											{(() => {
+												const cashPosition = analysisData.recommendations.positionSnapshot?.find(p => p.type === 'Cash');
+												const otherPositions = analysisData.recommendations.positionSnapshot?.filter(p => p.type !== 'Cash') || [];
+												
+												return (
+													<>
+														{/* Cash Balance Display */}
+														{cashPosition && (
+															<div className="mb-4 p-3 bg-gray-50 rounded-lg">
+																<div className="flex justify-between items-center">
+																	<div>
+																		<span className="text-sm font-medium text-gray-700">Cash Balance</span>
+																		{cashPosition.comment && (
+																			<span className="ml-2 text-xs text-gray-500">({cashPosition.comment})</span>
+																		)}
+																	</div>
+																	<span className="text-lg font-semibold">
+																		${Math.round(cashPosition.currentValue || 0).toLocaleString()}
+																	</span>
+																</div>
+															</div>
+														)}
+														
+														{/* Positions Table */}
+														<div className="overflow-x-auto">
+															<table className="w-full text-sm">
+																<thead>
+																	<tr className="border-b">
+																		<th className="text-left py-2">Type</th>
+																		<th className="text-left py-2">Symbol</th>
+																		<th className="text-right py-2">Qty</th>
+																		<th className="text-right py-2">Strike/Basis</th>
+																		<th className="text-right py-2">Premium</th>
+																		<th className="text-right py-2">Profit</th>
+																		<th className="text-left py-2">Status</th>
+																	</tr>
+																</thead>
+																<tbody>
+																	{otherPositions.map((position, idx) => (
+																		<tr key={idx} className="border-b">
+																			<td className="py-2">{position.type}</td>
+																			<td className="py-2">{position.ticker || '—'}</td>
+																			<td className="text-right py-2">{position.quantity}</td>
+																			<td className="text-right py-2">${Math.round((position.strike ?? position.basis ?? 0)).toLocaleString()}</td>
+																			<td className="text-right py-2">
+																				{position.type === 'Covered Call' && position.premiumCollected !== undefined ? 
+																					`$${Math.round(position.premiumCollected).toLocaleString()}` : 
+																					`$${Math.round((position.currentValue ?? 0)).toLocaleString()}`
+																				}
+																			</td>
+																			<td className={`text-right py-2 font-medium ${
+																				position.type === 'Covered Call' ? 'text-green-600' : 
+																				(position.pl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'
+																			}`}>
+																				{position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
+																					`$${Math.round(position.wheelProfit).toLocaleString()}` :
+																					position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
+																				}
+																			</td>
+																			<td className="py-2 text-xs text-gray-600 pl-4">{position.comment}</td>
+																		</tr>
+																	))}
+																</tbody>
+															</table>
+														</div>
+													</>
+												);
+											})()}
 										</CardContent>
 									</Card>
 

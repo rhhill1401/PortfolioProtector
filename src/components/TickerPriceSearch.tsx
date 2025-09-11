@@ -112,6 +112,7 @@ function preparePortfolioData(parsedPortfolio: PortfolioParseResult | null, uplo
 		return {
 			positions: parsedPortfolio.positions,
 			totalValue: parsedPortfolio.totalValue,
+			cashBalance: parsedPortfolio.cashBalance || 0,
 			parseErrors: parsedPortfolio.errors,
 			metadata: parsedPortfolio.metadata,
 			rawFiles: uploadFiles.map((f) => f.file.name),
@@ -392,6 +393,7 @@ export function TickerPriceSearch({
         brokerageType?: string;
         extractionConfidence?: string;
         metadata?: VisionPortfolioMetadata;
+        cashBalance?: number;
     }
 
     interface VisionResponse {
@@ -417,6 +419,7 @@ export function TickerPriceSearch({
             success: true,
             positions: stockPositions,
             totalValue: p.totalValue,
+            cashBalance: p.cashBalance || 0,
             errors: [],
             warnings:
                 p.extractionConfidence === 'low'

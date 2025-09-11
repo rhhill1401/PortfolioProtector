@@ -787,7 +787,12 @@ Return this JSON structure:
             if (g) {
               // Only patch if missing or null; do not change existing numbers
               if (pos.delta == null) pos.delta = g.delta;
-              if (pos.gamma == null) pos.gamma = g.gamma;
+              // Gamma fix: Always use fetched gamma when available (AI often returns 0)
+              if (g.gamma != null && g.gamma !== undefined) {
+                pos.gamma = g.gamma;
+              } else if (pos.gamma == null) {
+                pos.gamma = g.gamma;
+              }
               if (pos.theta == null) pos.theta = g.theta;
               if (pos.vega  == null) pos.vega  = g.vega;
               if (pos.iv    == null) pos.iv    = g.iv;
@@ -797,6 +802,26 @@ Return this JSON structure:
           }, 0);
 
           console.log('🔧 [POST-MERGE GREEKS] Patched positions with Greeks:', { merged: mergeCount, total: positions.length });
+          
+          // Debug logging for gamma merge issue
+          positions.forEach((pos, idx) => {
+            const sym = String(pos.symbol || '').toUpperCase();
+            const strike = Number(pos.strike || 0);
+            const expiry = normalizeExpiry(String(pos.expiry || ''));
+            const optType = String((pos.optionType || pos.type || '')).toUpperCase();
+            const key = `${sym}-${strike}-${expiry}-${optType}`;
+            const g = (optionGreeks as Record<string, OptionQuote | undefined>)[key];
+            
+            if (g?.gamma != null) {
+              console.log('🔍 [GAMMA MERGE DEBUG]', {
+                position: key,
+                aiGamma: positions[idx].gamma,
+                fetchedGamma: g.gamma,
+                finalGamma: pos.gamma,
+                wasReplaced: pos.gamma === g.gamma
+              });
+            }
+          });
         }
       } catch (mergeErr) {
         console.warn('⚠️ [POST-MERGE GREEKS] Merge step failed:', mergeErr);

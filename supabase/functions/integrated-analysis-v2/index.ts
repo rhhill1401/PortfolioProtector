@@ -319,7 +319,7 @@ Deno.serve(async (req) => {
 
   const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => {
     // Get Greeks for this position if available
-    const positionKey = `${opt.symbol}-${opt.strike}-${opt.expiry}-${opt.optionType}`;
+    const positionKey = `${(opt.symbol as string)?.toUpperCase()}-${opt.strike}-${opt.expiry}-${((opt.optionType as string) || 'CALL').toUpperCase()}`;
     const positionGreeks = optionGreeks && optionGreeks[positionKey] as OptionQuote | undefined;
     
     // Debug: Log each position lookup
@@ -762,6 +762,45 @@ Return this JSON structure:
         overallAssessment: analysis.summary?.overallAssessment,
         keyMessage: analysis.summary?.keyMessage
       });
+
+      // 🔧 Merge reliable Greeks from payload into AI output (LLM can drop fields)
+      try {
+        const positions = analysis?.wheelStrategy?.currentPositions as Array<Record<string, unknown>> | undefined;
+        if (positions && typeof optionGreeks === 'object' && optionGreeks !== null) {
+          const normalizeExpiry = (s: string): string => {
+            if (!s) return s;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+            const m = s.match(/^([A-Za-z]{3})-(\d{1,2})-(\d{4})$/);
+            if (!m) return s;
+            const months: Record<string, string> = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
+            const mon = months[m[1] as keyof typeof months];
+            return mon ? `${m[3]}-${mon}-${m[2].padStart(2,'0')}` : s;
+          };
+
+          const mergeCount = positions.reduce((acc, pos) => {
+            const sym = String(pos.symbol || '').toUpperCase();
+            const strike = Number(pos.strike || 0);
+            const expiry = normalizeExpiry(String(pos.expiry || ''));
+            const optType = String((pos.optionType || pos.type || '')).toUpperCase();
+            const key = `${sym}-${strike}-${expiry}-${optType}`;
+            const g = (optionGreeks as Record<string, OptionQuote | undefined>)[key];
+            if (g) {
+              // Only patch if missing or null; do not change existing numbers
+              if (pos.delta == null) pos.delta = g.delta;
+              if (pos.gamma == null) pos.gamma = g.gamma;
+              if (pos.theta == null) pos.theta = g.theta;
+              if (pos.vega  == null) pos.vega  = g.vega;
+              if (pos.iv    == null) pos.iv    = g.iv;
+              acc += 1;
+            }
+            return acc;
+          }, 0);
+
+          console.log('🔧 [POST-MERGE GREEKS] Patched positions with Greeks:', { merged: mergeCount, total: positions.length });
+        }
+      } catch (mergeErr) {
+        console.warn('⚠️ [POST-MERGE GREEKS] Merge step failed:', mergeErr);
+      }
         
     } catch (err) {
       console.error("Failed to parse AI response as JSON");

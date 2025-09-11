@@ -266,6 +266,21 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const [isAnalyzing, setIsAnalyzing] = useState(false);
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
+
+	// UI formatting helpers for Greeks
+	const fmtNoLeadZero = (v: number | null | undefined, decimals = 2): string => {
+		if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+		return Math.abs(v).toFixed(decimals).replace(/^0(?=\.)/, '.');
+	};
+
+	const fmtIV = (iv: number | null | undefined): string => {
+		if (iv === null || iv === undefined || Number.isNaN(iv)) return 'N/A';
+		const val = Math.abs(iv);
+		const pct = val > 1.5 ? val : val * 100; // handle percent vs fraction inputs
+		return `${pct.toFixed(2)}%`;
+	};
+
+	const fmtTheta = (theta: number | null | undefined): string => fmtNoLeadZero(theta, 2);
 	
 	const { data: optionChainData } = useOptionChain(tickerSymbol);
 	
@@ -913,19 +928,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<div>
 																	<span className="text-gray-600">Theta: </span>
 																	<span className="font-semibold">
-																		{position.theta !== null && position.theta !== undefined ? `$${position.theta.toFixed(2)}/day` : 'N/A'}
+																			{fmtTheta(position.theta)}
 																	</span>
 																</div>
 																<div>
 																	<span className="text-gray-600">Gamma: </span>
 																	<span className="font-semibold">
-																		{position.gamma !== null && position.gamma !== undefined ? position.gamma.toFixed(3) : 'N/A'}
+																			{position.gamma !== null && position.gamma !== undefined ? fmtNoLeadZero(position.gamma, 2) : 'N/A'}
 																	</span>
 																</div>
 																<div>
 																	<span className="text-gray-600">IV: </span>
 																	<span className="font-semibold">
-																		{position.iv !== null && position.iv !== undefined ? `${(position.iv * 100).toFixed(1)}%` : 'N/A'}
+																			{fmtIV(position.iv)}
 																	</span>
 																</div>
 															</div>

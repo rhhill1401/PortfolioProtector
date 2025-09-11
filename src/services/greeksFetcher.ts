@@ -149,10 +149,13 @@ export class GreeksFetcher {
         if (result.success && result.quote) {
           // Cache the result
           const cacheKey = this.getCacheKey(request.position);
+          console.log('BEFORE_CACHE:', result.quote);
+          console.log('CACHE_KEY:', cacheKey);
           this.cache[cacheKey] = {
             greeks: result.quote,
             timestamp: Date.now()
           };
+          console.log('AFTER_CACHE:', this.cache[cacheKey]);
           this.saveCacheToStorage();
           
           request.resolve(result.quote);

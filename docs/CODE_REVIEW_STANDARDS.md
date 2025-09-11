@@ -139,3 +139,4 @@ After making changes, verify:
 
 ## Remember
 Every line of code added increases maintenance burden. Always ask: "Can I extend existing code instead of writing new code?"
+React encourages splitting UI into reusable components so containers focus on state/data and children focus on rendering. This cut follows that pattern and preps the file for further safe extractions.

@@ -1,46 +1,27 @@
 // In TickerPriceSearch.tsx (updated with state management)
-import {useState, useEffect} from 'react';
+import {useState, useEffect, useCallback} from 'react';
 import {Button} from '@/components/ui/button';
-import {Loader2, Plus, X} from 'lucide-react';
+import {Loader2} from 'lucide-react';
 import {Tabs, TabsList, TabsTrigger, TabsContent} from '@/components/ui/tabs';
 import UploadStatusTracker from '@/components/UploadStatusTracker';
+import UploadTab from '@/components/UploadTab';
 import {PortfolioCSVParser} from '@/utils/portfolioParser';
-import {PortfolioParseResult} from '@/types/portfolio';
+import type { PortfolioParseResult } from '@/types/portfolio';
 
-import {
-	UploadState,
-	AnalysisReadiness,
-	UploadedFile,
-	initialUploadState,
-	initialReadiness,
-	UploadCategory,
-} from '@/types/analysis';
+import type { UploadState, AnalysisReadiness, UploadedFile, UploadCategory } from '@/types/analysis';
+import { initialUploadState, initialReadiness } from '@/types/analysis';
 import { greeksFetcher, type OptionPosition } from '@/services/greeksFetcher';
 import type { OptionQuote } from '@/services/optionLookup';
+import { callFn, callFnJson } from '@/services/supabaseFns';
+import { rangeDaysMap, inferTimeframe, createPriceContext, convertFileToBase64, type ChartMetric, type KeyLevel } from '@/utils/analysis';
 
 /* ---------- types ---------- */
 
-// ---------- days of history typically visible for each timeframe ----------
-const rangeDaysMap: Record<string, number> = {
-	'5-min': 1,
-	'15-min': 3,
-	'30-min': 5,
-	'1-hour': 10,
-	'4-hour': 30,
-	Daily: 180,
-	Weekly: 365 * 2,
-};
 interface TickerPriceSearchProps {
 	tickerSymbol: string;
 	onTickerChange: (v: string) => void;
 }
 
-interface UploadTabProps {
-	id: string;
-	accept: string;
-	multiple: boolean;
-	onFiles: (files: FileList) => void;
-}
 
 interface MarketstackEodData {
 	symbol: string;
@@ -62,50 +43,7 @@ interface PriceInfo {
 	percent: string | null;
 }
 
-// Timeframe inference (module scope so helpers can use it)
-const inferTimeframe = (fileName: string): string => {
-	const n = fileName.toLowerCase();
-	if (n.includes('4h') || n.includes('4-h') || n.includes('4hr') || n.includes('4 hour')) return '4-hour';
-	if (n.includes('1h') || n.includes('1-h') || n.includes('1hr') || n.includes('1 hour')) return '1-hour';
-	if (n.includes('30m') || n.includes('30min') || n.includes('30 min')) return '30-min';
-	if (n.includes('15m') || n.includes('15min') || n.includes('15 min')) return '15-min';
-	if (n.includes('5m') || n.includes('5min') || n.includes('5 min')) return '5-min';
-	if (n.includes('weekly') || n.includes('1w') || n.includes('week')) return 'Weekly';
-	if (n.includes('daily') || n.includes('1d') || n.includes('day')) return 'Daily';
-	return '4-hour';
-};
 
-// Helper functions for Supabase calls - DRY principle
-function getSupaEnv() {
-	const fnUrl = import.meta.env.VITE_SUPABASE_FN_URL;
-	const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-	if (!fnUrl || !anonKey) throw new Error('Supabase Function URL or Anon Key is not configured. Check .env.local.');
-	return { fnUrl, anonKey };
-}
-
-async function callFn(name: string, payload: unknown) {
-	const { fnUrl, anonKey } = getSupaEnv();
-	return fetch(`${fnUrl}/${name}`, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			apikey: anonKey,
-			Authorization: `Bearer ${anonKey}`,
-		},
-		body: JSON.stringify(payload),
-	});
-}
-
-async function callFnJson<T = any>(name: string, payload: unknown): Promise<{ ok: boolean; status: number; data?: T; text?: string; }> {
-	const res = await callFn(name, payload);
-	const ct = res.headers.get('content-type') || '';
-	if (ct.includes('application/json')) {
-		const data = await res.json();
-		return { ok: res.ok, status: res.status, data };
-	}
-	const text = await res.text();
-	return { ok: res.ok, status: res.status, text };
-}
 
 
 // Log portfolio validation
@@ -167,36 +105,6 @@ function processChartAnalysisResults(chartAnalysisResults: ChartAnalysisResult[]
 }
 
 // Create price context from EOD data
-function createPriceContext(eodData: any, chartMetrics: ChartMetric[]) {
-	const detectedTimeframe = chartMetrics[0]?.timeframe || '4-hour';
-	const rangeDays = rangeDaysMap[detectedTimeframe] || 180;
-
-	if (!eodData) {
-		return {
-			current: null,
-			open: null,
-			high: null,
-			low: null,
-			close: null,
-			volume: null,
-			date: null,
-			timeframe: detectedTimeframe,
-			rangeDays
-		};
-	}
-
-	return {
-		current: eodData.close || null,
-		open: eodData.open || null,
-		high: eodData.high || null,
-		low: eodData.low || null,
-		close: eodData.close || null,
-		volume: eodData.volume || null,
-		date: eodData.date || null,
-		timeframe: detectedTimeframe,
-		rangeDays
-	};
-}
 
 // Prepare portfolio data for analysis
 function preparePortfolioData(parsedPortfolio: PortfolioParseResult | null, uploadFiles: UploadedFile[]) {
@@ -215,18 +123,6 @@ function preparePortfolioData(parsedPortfolio: PortfolioParseResult | null, uplo
 	};
 }
 
-interface KeyLevel {
-	price: number;
-	type: 'Support' | 'Resistance';
-	strength: string;
-}
-interface ChartMetric {
-	timeframe: string; // Added
-	keyLevels: KeyLevel[];
-	trend: string;
-	rsi: string;
-	macd: string;
-}
 
 interface ChartAnalysisResult {
 	fileName: string;
@@ -258,124 +154,6 @@ interface ProcessedChartData {
 	processingStatus: 'pending' | 'processing' | 'completed' | 'error';
 }
 
-// Re‑usable drag‑and‑drop upload wrapper
-function UploadTab({id, accept, multiple, onFiles}: UploadTabProps) {
-	/* local preview list */
-	const [previews, setPreviews] = useState<{url: string; file: File}[]>([]);
-	const [isDragging, setIsDragging] = useState(false);
-
-	/* when the component unmounts, revoke blobs */
-	useEffect(
-		() => () => previews.forEach((p) => URL.revokeObjectURL(p.url)),
-		[previews]
-	);
-
-	const addFiles = (files: FileList) => {
-		if (!files.length) return;
-		/* show preview immediately */
-		const next = Array.from(files).map((file) => ({
-			file,
-			url: file.type.startsWith('image/')
-				? URL.createObjectURL(file)
-				: '', // empty url for non-images
-		}));
-		setPreviews((prev) => [...prev, ...next]);
-		onFiles(files); // delegate to parent upload logic
-	};
-
-	/* —— handlers —— */
-	const handleDrop = (e: React.DragEvent) => {
-		e.preventDefault();
-		setIsDragging(false);
-		addFiles(e.dataTransfer.files);
-	};
-
-	const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-		if (e.target.files) {
-			addFiles(e.target.files);
-			e.target.value = ''; // reset so same file can be chosen again
-		}
-	};
-
-	const remove = (url: string) =>
-		setPreviews((prev) => prev.filter((p) => p.url !== url));
-
-	/* —— UI —— */
-	return (
-		<div
-			onDragOver={(e) => {
-				e.preventDefault();
-				setIsDragging(true);
-			}}
-			onDragLeave={(e) => {
-				e.preventDefault();
-				setIsDragging(false);
-			}}
-			onDrop={handleDrop}
-			className={`relative rounded-lg min-h-[250px] bg-[#766DFB] border-2 border-dashed transition-all
-		  ${isDragging ? 'border-white/80 bg-white/10' : 'border-white/30'}`}>
-			{/* hidden file input */}
-			<input
-				id={id}
-				type='file'
-				accept={accept}
-				multiple={multiple}
-				className='hidden'
-				onChange={handleInput}
-			/>
-
-			{/* empty-state cover */}
-			{previews.length === 0 && (
-				<label
-					htmlFor={id}
-					className='absolute inset-0 flex flex-col items-center justify-center text-white cursor-pointer'>
-					<div className='bg-white/20 rounded-full p-4 mb-4'>
-						<Plus className='h-8 w-8' />
-					</div>
-					<span className='text-lg font-semibold'>Upload File</span>
-					<span className='text-sm text-white/70 mt-2'>
-						Drag &amp; drop or click
-					</span>
-				</label>
-			)}
-
-			{/* thumbnails grid */}
-			{previews.length > 0 && (
-				<div className='p-4 grid grid-cols-3 gap-2'>
-					{previews.map(({url, file}) => (
-						<div
-							key={url || file.name}
-							className='relative aspect-square rounded overflow-hidden bg-white/20'>
-							{/* image or generic icon */}
-							{url ? (
-								<img
-									src={url}
-									alt={file.name}
-									className='object-cover w-full h-full'
-								/>
-							) : (
-								<div className='flex items-center justify-center w-full h-full text-xs p-2 text-white/80'>
-									{file.name
-										.split('.')
-										.pop()
-										?.toUpperCase() || 'FILE'}
-								</div>
-							)}
-
-							{/* close button */}
-							<button
-								onClick={() => remove(url)}
-								className='absolute -top-2 -right-2 bg-black/70 rounded-full p-1 hover:bg-red-600 transition-colors'
-								aria-label='Remove'>
-								<X className='h-3 w-3 text-white' />
-							</button>
-						</div>
-					))}
-				</div>
-			)}
-		</div>
-	);
-}
 
 type AnalysisPanelProps = {
 	eodData: MarketstackEodData;
@@ -532,29 +310,15 @@ export function TickerPriceSearch({
 	const [readiness, setReadiness] =
 		useState<AnalysisReadiness>(initialReadiness);
 
-	// Check if all requirements are met
-	const checkReadiness = () => {
-		const tickerValid = !!eodData && !!eodData.symbol;
-		const portfolioReady = uploadState.portfolio.status === 'ready';
-		const chartsReady = uploadState.charts.status === 'ready';
-		const researchReady = uploadState.research.status === 'ready';
-
-		const allRequirementsMet =
-			tickerValid && portfolioReady && chartsReady && researchReady;
-
-		setReadiness({
-			tickerValid,
-			portfolioReady,
-			chartsReady,
-			researchReady,
-			allRequirementsMet,
-		});
-	};
-
-	// Update readiness whenever upload state or ticker changes
-	useEffect(() => {
-		checkReadiness();
-	}, [uploadState, eodData]);
+    // Update readiness whenever upload state or ticker changes
+    useEffect(() => {
+        const tickerValid = !!eodData && !!eodData.symbol;
+        const portfolioReady = uploadState.portfolio.status === 'ready';
+        const chartsReady = uploadState.charts.status === 'ready';
+        const researchReady = uploadState.research.status === 'ready';
+        const allRequirementsMet = tickerValid && portfolioReady && chartsReady && researchReady;
+        setReadiness({ tickerValid, portfolioReady, chartsReady, researchReady, allRequirementsMet });
+    }, [uploadState, eodData]);
 
 	// Update upload state for a specific category
 	const updateUploadState = (category: UploadCategory, files: FileList) => {
@@ -609,6 +373,65 @@ export function TickerPriceSearch({
         return result;
     };
 
+    interface VisionPosition {
+        symbol: string;
+        quantity: number;
+        purchasePrice: number;
+        currentPrice: number;
+        marketValue: number;
+    }
+
+    interface VisionPortfolioMetadata {
+        optionPositions?: OptionPosition[];
+    }
+
+    interface VisionPortfolio {
+        positions?: VisionPosition[];
+        totalValue: number;
+        portfolioDetected: boolean;
+        brokerageType?: string;
+        extractionConfidence?: string;
+        metadata?: VisionPortfolioMetadata;
+    }
+
+    interface VisionResponse {
+        success: boolean;
+        portfolio?: VisionPortfolio;
+    }
+
+    const buildParseResultFromVision = (
+        vision: VisionResponse,
+        fileName: string,
+    ): PortfolioParseResult | null => {
+        if (!vision?.success || !vision.portfolio?.portfolioDetected) return null;
+        const p = vision.portfolio;
+        const stockPositions = (p.positions ?? []).map((pos) => ({
+            symbol: pos.symbol,
+            quantity: pos.quantity,
+            purchasePrice: pos.purchasePrice,
+            currentPrice: pos.currentPrice,
+            marketValue: pos.marketValue,
+            percentOfPortfolio: (pos.marketValue / p.totalValue) * 100,
+        }));
+        return {
+            success: true,
+            positions: stockPositions,
+            totalValue: p.totalValue,
+            errors: [],
+            warnings:
+                p.extractionConfidence === 'low'
+                    ? ['Low confidence in data extraction - please verify positions']
+                    : [],
+            metadata: {
+                source: 'image_analysis',
+                brokerageType: p.brokerageType,
+                extractionConfidence: p.extractionConfidence,
+                fileName,
+                optionPositions: p.metadata?.optionPositions || [],
+            },
+        };
+    };
+
     const analyzePortfolioImage = async (imageFile: File): Promise<PortfolioParseResult | null> => {
         try {
             const base64 = await convertFileToBase64(imageFile);
@@ -616,35 +439,8 @@ export function TickerPriceSearch({
                 image: base64,
                 ticker: eodData?.symbol || 'UNKNOWN',
             });
-            const visionData = await visionResponse.json();
-            if (!visionData?.success || !visionData?.portfolio?.portfolioDetected) return null;
-
-            const stockPositions = (visionData.portfolio.positions || []).map((pos: any) => ({
-                symbol: pos.symbol,
-                quantity: pos.quantity,
-                purchasePrice: pos.purchasePrice,
-                currentPrice: pos.currentPrice,
-                marketValue: pos.marketValue,
-                percentOfPortfolio: (pos.marketValue / visionData.portfolio.totalValue) * 100,
-            }));
-            const result: PortfolioParseResult = {
-                success: true,
-                positions: stockPositions,
-                totalValue: visionData.portfolio.totalValue,
-                errors: [],
-                warnings:
-                    visionData.portfolio.extractionConfidence === 'low'
-                        ? ['Low confidence in data extraction - please verify positions']
-                        : [],
-                metadata: {
-                    source: 'image_analysis',
-                    brokerageType: visionData.portfolio.brokerageType,
-                    extractionConfidence: visionData.portfolio.extractionConfidence,
-                    fileName: imageFile.name,
-                    optionPositions: visionData.portfolio.metadata?.optionPositions || [],
-                },
-            };
-            return result;
+            const visionData = (await visionResponse.json()) as VisionResponse;
+            return buildParseResultFromVision(visionData, imageFile.name);
         } catch {
             return null;
         }
@@ -694,6 +490,44 @@ export function TickerPriceSearch({
         }
     };
 
+    // Extracted to reduce complexity in handlePortfolioUpload (no behavior change)
+    const summarizePortfolioResult = async (
+        portfolioResult: PortfolioParseResult | null
+    ): Promise<void> => {
+        if (portfolioResult) {
+            console.log('🎉 [PORTFOLIO UPLOAD] Final portfolio data:', {
+                totalPositions: portfolioResult.positions.length,
+                totalValue: portfolioResult.totalValue,
+                source: portfolioResult.metadata?.source || 'csv'
+            });
+
+            if (
+                portfolioResult?.metadata?.optionPositions &&
+                portfolioResult.metadata.optionPositions.length > 0
+            ) {
+                const currentSymbol = eodData?.symbol?.toUpperCase();
+                const allPositions = portfolioResult.metadata
+                    .optionPositions as OptionPosition[];
+                const relevantPositions = currentSymbol
+                    ? allPositions.filter(
+                          (p) => p.symbol?.toUpperCase() === currentSymbol
+                      )
+                    : allPositions;
+
+                console.log('📊 [GREEKS] Fetching Greeks for option positions...', {
+                    totalPositions: allPositions.length,
+                    filteredForSymbol: currentSymbol,
+                    positionsToFetch: relevantPositions.length,
+                });
+
+                await fetchAndSetGreeks(relevantPositions);
+            }
+        } else {
+            console.log('❌ [PORTFOLIO UPLOAD] No portfolio data extracted from any files');
+        }
+    };
+
+    /* eslint-disable-next-line max-params */
     const buildAnalysisPayload = (
         eod: MarketstackEodData | null,
         parsed: PortfolioParseResult | null,
@@ -703,7 +537,26 @@ export function TickerPriceSearch({
     ) => {
         const { chartData, failedCharts, chartMetrics } = processChartAnalysisResults(chartResults);
         const priceContext = createPriceContext(eod, chartMetrics);
-        const portfolioData = preparePortfolioData(parsed, _uploadState.portfolio.files);
+        let portfolioData = preparePortfolioData(parsed, _uploadState.portfolio.files);
+
+        // Ensure option positions in payload use same key format as greeksMap
+        if (portfolioData?.metadata && Array.isArray((portfolioData.metadata as any).optionPositions)) {
+            const normalized = normalizeOptionPositionsExpiry(
+                (portfolioData.metadata as any).optionPositions as OptionPosition[]
+            ).map((p) => ({
+                ...p,
+                symbol: (p.symbol || '').toUpperCase(),
+                optionType: (String(p.optionType || 'CALL').toUpperCase() as 'CALL' | 'PUT'),
+                expiry: normalizeExpiry(p.expiry),
+            }));
+            portfolioData = {
+                ...portfolioData,
+                metadata: {
+                    ...(portfolioData.metadata as Record<string, unknown>),
+                    optionPositions: normalized,
+                },
+            } as typeof portfolioData;
+        }
         return {
             ticker: eod?.symbol,
             portfolio: portfolioData,
@@ -720,14 +573,15 @@ export function TickerPriceSearch({
         };
     };
 
-    const submitAnalysis = async (payload: any) => {
+    type IAResponse = { success: boolean; analysis?: unknown; error?: string };
+    const submitAnalysis = async (payload: unknown) => {
         const useLegacy = new URLSearchParams(window.location.search).has('useLegacy');
         const endpoint = useLegacy ? 'integrated-analysis' : 'integrated-analysis-v2';
-        const out = await callFnJson(endpoint, payload);
+        const out = await callFnJson<IAResponse>(endpoint, payload);
         if (!out.ok || !out.data) {
-            throw new Error(out.text || (out.data as any)?.error || `HTTP ${out.status}`);
+            throw new Error(out.text || (out.data as IAResponse)?.error || `HTTP ${out.status}`);
         }
-        const j: any = out.data;
+        const j: IAResponse = out.data as IAResponse;
         if (j.success) {
             window.dispatchEvent(new CustomEvent('analysis-ready', { detail: j.analysis }));
         } else {
@@ -750,6 +604,7 @@ export function TickerPriceSearch({
                 uploadState,
                 optionGreeks,
             );
+            console.log('GREEKS IN PAYLOAD:', (analysisPayload as any).optionGreeks);
             logPortfolioValidation(analysisPayload, eodData?.symbol || '');
             await submitAnalysis(analysisPayload);
         } catch (err) {
@@ -784,22 +639,8 @@ export function TickerPriceSearch({
             // Analyze images and merge (CSV takes precedence)
             portfolioResult = await analyzePortfolioImages(imageFiles, portfolioResult);
 
-            // Final summary
-            if (portfolioResult) {
-                console.log('🎉 [PORTFOLIO UPLOAD] Final portfolio data:', {
-                    totalPositions: portfolioResult.positions.length,
-                    totalValue: portfolioResult.totalValue,
-                    source: portfolioResult.metadata?.source || 'csv'
-                });
-                
-                // Fetch Greeks for all option positions
-                if (portfolioResult?.metadata?.optionPositions && portfolioResult.metadata.optionPositions.length > 0) {
-                    console.log('📊 [GREEKS] Starting to fetch Greeks for option positions...');
-                    await fetchAndSetGreeks(portfolioResult.metadata.optionPositions as OptionPosition[]);
-                }
-            } else {
-                console.log('❌ [PORTFOLIO UPLOAD] No portfolio data extracted from any files');
-            }
+            // Final summary (extracted helper)
+            await summarizePortfolioResult(portfolioResult);
 
 		} catch (error) {
 			console.error('💥 [PORTFOLIO UPLOAD] Failed to process portfolio files:', error);
@@ -815,20 +656,7 @@ export function TickerPriceSearch({
 
 	// Added: infer timeframe from file‑name keywords
 
-	const convertFileToBase64 = (file: File): Promise<string> => {
-		return new Promise((resolve, reject) => {
-			const reader = new FileReader();
-			reader.readAsDataURL(file);
-			reader.onload = () => {
-				if (typeof reader.result === 'string') {
-					resolve(reader.result);
-				} else {
-					reject(new Error('Failed to convert file to base64'));
-				}
-			};
-			reader.onerror = (error) => reject(error);
-		});
-	};
+    // convertFileToBase64 imported from utils/analysis
 
 	const handleChartsUpload = async (files: FileList) => {
 		updateUploadState('charts', files);
@@ -860,7 +688,7 @@ export function TickerPriceSearch({
 	setProcessedChartData((prev) => [...prev, ...processedCharts]);
 	};
 
-	const analyzeChartImage = async (
+	const analyzeChartImage = useCallback(async (
 		chartData: ProcessedChartData
 	): Promise<ChartAnalysisResult> => {
 		try {
@@ -910,9 +738,14 @@ export function TickerPriceSearch({
 				analyzedAt: new Date(),
 			};
 		}
-	};
+	}, [eodData]);
+
+	const [chartAnalysisResults, setChartAnalysisResults] = useState<
+		ChartAnalysisResult[]
+	>([]);
+
 	// Helper to mark charts as ready after analysis
-	const markChartsReady = (results?: ChartAnalysisResult[]) => {
+    const markChartsReady = useCallback((results?: ChartAnalysisResult[]) => {
 		// Use passed results or fall back to state
 		const resultsToCheck = results || chartAnalysisResults;
 
@@ -939,9 +772,9 @@ export function TickerPriceSearch({
 				charts: {...prev.charts, status: 'ready' as const},
 			}));
 		}
-	};
+    }, [chartAnalysisResults, processedChartData, setUploadState]);
 
-	const processChartAnalysis = async () => {
+    const processChartAnalysis = useCallback(async () => {
 		const pendingCharts = processedChartData.filter(
 			(chart) => chart.processingStatus === 'pending'
 		);
@@ -983,11 +816,11 @@ export function TickerPriceSearch({
 				if (result) {
 					return {
 						...chart,
-						processingStatus:
-							result.status === 'completed'
-								? 'completed'
-								: 'error',
-					};
+                    processingStatus:
+                        result.status === 'completed'
+                            ? 'completed'
+                            : 'error',
+                };
 				}
 				return chart;
 			})
@@ -1008,11 +841,7 @@ export function TickerPriceSearch({
 		);
 		// All charts now processed → mark category ready
 		// markChartsReady();  // (removed: now handled above only if all finished)
-	};
-
-	const [chartAnalysisResults, setChartAnalysisResults] = useState<
-		ChartAnalysisResult[]
-	>([]);
+    }, [processedChartData, analyzeChartImage, setProcessedChartData, setChartAnalysisResults, markChartsReady]);
 
 	useEffect(() => {
 		if (chartAnalysisResults.length > 0 && processedChartData.length > 0) {
@@ -1027,7 +856,7 @@ export function TickerPriceSearch({
 				markChartsReady();
 			}
 		}
-	}, [chartAnalysisResults, processedChartData]);
+    }, [chartAnalysisResults, processedChartData, markChartsReady]);
 
 	const handleResearchUpload = (files: FileList) => {
 		updateUploadState('research', files);
@@ -1048,30 +877,16 @@ export function TickerPriceSearch({
 	}, []);
 
 	// Kick off chart analysis as soon as any new pending charts appear
-	useEffect(() => {
-		const hasPending = processedChartData.some(
-			(c) => c.processingStatus === 'pending'
-		);
-		if (hasPending) {
-			processChartAnalysis();
-		}
-	}, [processedChartData]);
+    useEffect(() => {
+        const hasPending = processedChartData.some(
+            (c) => c.processingStatus === 'pending'
+        );
+        if (hasPending) {
+            processChartAnalysis();
+        }
+    }, [processedChartData, processChartAnalysis]);
 
-	// Existing quote fetch logic
-	useEffect(() => {
-		const t = setTimeout(() => {
-			const sym = tickerSymbol.trim().toUpperCase();
-			if (sym) {
-				fetchQuote(sym);
-			} else {
-				setEodData(null);
-				setError(null);
-			}
-		}, 500);
-		return () => clearTimeout(t);
-	}, [tickerSymbol]);
-
-	async function fetchQuote(symbol: string) {
+	const fetchQuote = useCallback(async (symbol: string) => {
 		if (!apiKey) return setError('Marketstack key missing.');
 		setIsLoading(true);
 		setError(null);
@@ -1112,7 +927,21 @@ export function TickerPriceSearch({
 		} finally {
 			setIsLoading(false);
 		}
-	}
+	}, [apiKey]);
+
+	// Existing quote fetch logic
+    useEffect(() => {
+        const t = setTimeout(() => {
+            const sym = tickerSymbol.trim().toUpperCase();
+            if (sym) {
+                fetchQuote(sym);
+            } else {
+                setEodData(null);
+                setError(null);
+            }
+        }, 500);
+        return () => clearTimeout(t);
+    }, [tickerSymbol, fetchQuote]);
 
 	const nf = (v: number | null) => (v == null ? 'N/A' : v.toFixed(2));
 	const df = (d?: string | null) =>

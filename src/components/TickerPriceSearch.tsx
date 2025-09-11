@@ -13,6 +13,7 @@ import { initialUploadState, initialReadiness } from '@/types/analysis';
 import { greeksFetcher, type OptionPosition } from '@/services/greeksFetcher';
 import type { OptionQuote } from '@/services/optionLookup';
 import { callFn, callFnJson } from '@/services/supabaseFns';
+import { MarketDataFetcher } from '@/services/marketDataFetcher';
 import { rangeDaysMap, inferTimeframe, createPriceContext, convertFileToBase64, type ChartMetric, type KeyLevel } from '@/utils/analysis';
 
 /* ---------- types ---------- */
@@ -531,7 +532,7 @@ export function TickerPriceSearch({
     };
 
     /* eslint-disable-next-line max-params */
-    const buildAnalysisPayload = (
+    const buildAnalysisPayload = async (
         eod: MarketstackEodData | null,
         parsed: PortfolioParseResult | null,
         chartResults: ChartAnalysisResult[],
@@ -541,6 +542,20 @@ export function TickerPriceSearch({
         const { chartData, failedCharts, chartMetrics } = processChartAnalysisResults(chartResults);
         const priceContext = createPriceContext(eod, chartMetrics);
         let portfolioData = preparePortfolioData(parsed, _uploadState.portfolio.files);
+        
+        // Fetch real market data
+        const currentPrice = eod?.close || 0;
+        const ticker = eod?.symbol || '';
+        
+        // Get current IV from Greeks if available
+        let currentIV: number | undefined;
+        if (greeksMap.size > 0) {
+            const firstGreek = Array.from(greeksMap.values())[0];
+            currentIV = firstGreek?.iv;
+        }
+        
+        const marketData = await MarketDataFetcher.fetchMarketData(ticker, currentPrice, currentIV);
+        console.log('📊 [MARKET DATA] Fetched for analysis:', marketData);
 
         // Ensure option positions in payload use same key format as greeksMap
         if (portfolioData?.metadata && Array.isArray((portfolioData.metadata as any).optionPositions)) {
@@ -573,6 +588,7 @@ export function TickerPriceSearch({
             research: _uploadState.research.files.map((f) => ({ name: f.file.name })),
             priceContext,
             optionGreeks: Object.fromEntries(greeksMap),
+            marketData, // Add real market data to payload
         };
     };
 
@@ -600,7 +616,7 @@ export function TickerPriceSearch({
 
         window.dispatchEvent(new Event('analysis-start'));
         try {
-            const analysisPayload = buildAnalysisPayload(
+            const analysisPayload = await buildAnalysisPayload(
                 eodData,
                 parsedPortfolio,
                 chartAnalysisResults,
@@ -608,6 +624,7 @@ export function TickerPriceSearch({
                 optionGreeks,
             );
             console.log('GREEKS IN PAYLOAD:', (analysisPayload as any).optionGreeks);
+            console.log('MARKET DATA IN PAYLOAD:', (analysisPayload as any).marketData);
             logPortfolioValidation(analysisPayload, eodData?.symbol || '');
             await submitAnalysis(analysisPayload);
         } catch (err) {

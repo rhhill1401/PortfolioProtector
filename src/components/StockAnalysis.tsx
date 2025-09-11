@@ -68,6 +68,45 @@ interface VixImpact {
 	action: string;
 }
 
+interface MarketSentiment {
+	etfFlows?: {
+		netFlows: string;
+		trend: string;
+		impact: string;
+		recommendation: string;
+	};
+	navAnalysis?: {
+		premium: string;
+		discount: string;
+		interpretation: string;
+		tradingOpportunity: string;
+	};
+	volatilityMetrics?: {
+		currentIV: string;
+		ivRank: string;
+		callPutSkew: string;
+		premiumEnvironment: string;
+		wheelStrategy: string;
+	};
+	optionsFlow?: {
+		largeOrders: string;
+		openInterest: string;
+		putCallRatio: string;
+		sentiment: string;
+	};
+	upcomingCatalysts?: Array<{
+		event: string;
+		date: string;
+		impact: string;
+		preparation: string;
+	}>;
+	overallSentiment?: {
+		summary: string;
+		confidence: string;
+		recommendation: string;
+	};
+}
+
 interface PriceInfo {
 	price: number | null;
 	change: number | null;
@@ -177,6 +216,7 @@ interface StockAnalysisData {
     additionalDataNeeded?: string;
     wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
     vix?: number; // VIX value for volatility display
+    marketSentiment?: MarketSentiment; // NEW - comprehensive market analysis
     // Optional nested recommendations object produced by integrated-analysis
         recommendations?: {
             positionSnapshot?: Array<{
@@ -357,6 +397,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				keyLevels: analysisData.keyLevels ?? [],
 				fundamentals: analysisData.fundamentals ?? [],
 				vixImpact: analysisData.vixImpact ?? [],
+				marketSentiment: analysisData.marketSentiment ?? {},
 				recommendation: toPieArray(analysisData.recommendation),
 		  }
 		: null;
@@ -1680,90 +1721,204 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 
 						{/* Market Context Tab Content */}
 						<TabsContent value='market-context' className='space-y-4'>
-							<Card>
-								<CardHeader>
-									<CardTitle>
-										Key Technical Indicators
-									</CardTitle>
-								</CardHeader>
-								<CardContent>
-									<table className='w-full text-sm'>
-										<thead>
-											<tr className='border-b'>
-												<th className='text-left py-2'>
-													Indicator
-												</th>
-												<th className='text-left py-2'>
-													Value
-												</th>
-												<th className='text-left py-2'>
-													Interpretation
-												</th>
-												<th className='text-left py-2'>
-													Impact
-												</th>
-											</tr>
-										</thead>
-										<tbody>
-											{displayData.technicalFactors.map(
-												(tf, idx) => (
-													<tr
-														key={idx}
-														className='border-b last:border-0'>
-														<td className='py-2'>
-															{tf.factor}
-														</td>
+							{/* Overall Market Sentiment */}
+							{displayData.marketSentiment?.overallSentiment && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Market Sentiment Overview</CardTitle>
+									</CardHeader>
+									<CardContent>
+										<div className="space-y-2">
+											<p className="text-sm">{displayData.marketSentiment.overallSentiment.summary}</p>
+											<div className="flex justify-between items-center mt-2">
+												<span className="text-xs text-gray-500">Confidence: {displayData.marketSentiment.overallSentiment.confidence}</span>
+												<span className="text-sm font-medium text-blue-600">{displayData.marketSentiment.overallSentiment.recommendation}</span>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* ETF Flows (for crypto assets) */}
+							{displayData.marketSentiment?.etfFlows && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH') && (
+								<Card>
+									<CardHeader>
+										<CardTitle>ETF Flow Analysis</CardTitle>
+										<CardDescription>Net inflows/outflows and impact on spot price</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<p className="text-xs text-gray-500">Net Flows</p>
+												<p className="font-medium">{displayData.marketSentiment.etfFlows.netFlows}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Trend</p>
+												<p className="font-medium">{displayData.marketSentiment.etfFlows.trend}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Impact</p>
+												<p className="text-sm">{displayData.marketSentiment.etfFlows.impact}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Recommendation</p>
+												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.etfFlows.recommendation}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* NAV Analysis (for ETFs) */}
+							{displayData.marketSentiment?.navAnalysis && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH') && (
+								<Card>
+									<CardHeader>
+										<CardTitle>NAV Premium/Discount</CardTitle>
+										<CardDescription>Trading relative to net asset value</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<p className="text-xs text-gray-500">Premium</p>
+												<p className="font-medium">{displayData.marketSentiment.navAnalysis.premium}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Discount</p>
+												<p className="font-medium">{displayData.marketSentiment.navAnalysis.discount}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Interpretation</p>
+												<p className="text-sm">{displayData.marketSentiment.navAnalysis.interpretation}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Trading Opportunity</p>
+												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.navAnalysis.tradingOpportunity}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Volatility Metrics */}
+							{displayData.marketSentiment?.volatilityMetrics && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Volatility Analysis</CardTitle>
+										<CardDescription>Implied volatility and premium environment</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<p className="text-xs text-gray-500">Current IV</p>
+												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.currentIV}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">IV Rank</p>
+												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.ivRank}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Call/Put Skew</p>
+												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.callPutSkew}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Premium Environment</p>
+												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.premiumEnvironment}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Wheel Strategy Impact</p>
+												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.volatilityMetrics.wheelStrategy}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Options Flow */}
+							{displayData.marketSentiment?.optionsFlow && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Options Flow & Positioning</CardTitle>
+										<CardDescription>Large trader activity and sentiment</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<p className="text-xs text-gray-500">Large Orders</p>
+												<p className="text-sm">{displayData.marketSentiment.optionsFlow.largeOrders}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Put/Call Ratio</p>
+												<p className="text-sm">{displayData.marketSentiment.optionsFlow.putCallRatio}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Open Interest</p>
+												<p className="text-sm">{displayData.marketSentiment.optionsFlow.openInterest}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Market Sentiment</p>
+												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.optionsFlow.sentiment}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Upcoming Catalysts */}
+							{displayData.marketSentiment?.upcomingCatalysts && displayData.marketSentiment.upcomingCatalysts.length > 0 && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Upcoming Catalysts</CardTitle>
+										<CardDescription>Events that may impact volatility and premiums</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="space-y-3">
+											{displayData.marketSentiment.upcomingCatalysts.map((catalyst, idx) => (
+												<div key={idx} className="border-l-2 border-blue-500 pl-3">
+													<div className="flex justify-between items-start">
+														<div>
+															<p className="font-medium text-sm">{catalyst.event}</p>
+															<p className="text-xs text-gray-500">Date: {catalyst.date}</p>
+															<p className="text-xs text-gray-500">Impact: {catalyst.impact}</p>
+														</div>
+													</div>
+													<p className="text-sm mt-1">{catalyst.preparation}</p>
+												</div>
+											))}
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Legacy Technical Indicators (keep for compatibility) */}
+							{displayData.technicalFactors.length > 0 && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Technical Indicators</CardTitle>
+									</CardHeader>
+									<CardContent>
+										<table className='w-full text-sm'>
+											<thead>
+												<tr className='border-b'>
+													<th className='text-left py-2'>Indicator</th>
+													<th className='text-left py-2'>Value</th>
+													<th className='text-left py-2'>Interpretation</th>
+													<th className='text-left py-2'>Impact</th>
+												</tr>
+											</thead>
+											<tbody>
+												{displayData.technicalFactors.map((tf, idx) => (
+													<tr key={idx} className='border-b last:border-0'>
+														<td className='py-2'>{tf.factor}</td>
 														<td>{tf.value}</td>
-														<td>
-															{tf.interpretation}
-														</td>
+														<td>{tf.interpretation}</td>
 														<td>{tf.impact}</td>
 													</tr>
-												)
-											)}
-											{/* ---------- Added: visual S/R levels ---------- */}
-                                        {analysisData?.chartMetrics?.[0]
-												?.keyLevels?.length ? (
-                                            analysisData.chartMetrics[0].keyLevels.map(
-                                                (lvl: KeyLevel, idx: number) => (
-														<tr key={idx}>
-															{/* Added: label shows Support / Resistance */}
-															<td className='py-1'>
-																{lvl.type}
-															</td>
-															{/* Added: numeric price formatted to 2 decimals */}
-															<td>
-																{lvl.price.toFixed(
-																	2
-																)}
-																{/* Optional: strength badge */}
-																<span className='ml-2 text-xs opacity-70'>
-																	{
-																		lvl.strength
-																	}
-																</span>
-															</td>
-															{/* Keep empty cells to preserve table structure */}
-															<td></td>
-															<td></td>
-														</tr>
-													)
-												)
-											) : (
-												<tr>
-													<td className='py-1'>
-														Key levels
-													</td>
-													<td>None</td>
-													<td></td>
-													<td></td>
-												</tr>
-											)}
-										</tbody>
-									</table>
-								</CardContent>
-							</Card>
-							{/* Add S/R Levels Card (using displayData.keyLevels) and Candlestick Card here later */}
+												))}
+											</tbody>
+										</table>
+									</CardContent>
+								</Card>
+							)}
 						</TabsContent>
 
 						{/* Strategy Tab Content */}

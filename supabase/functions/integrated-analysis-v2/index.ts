@@ -18,11 +18,12 @@ const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5";
 async function callOpenAI(OPENAI_API_KEY: string, OPENAI_MODEL: string, prompt: string): Promise<Record<string, unknown>> {
   const model = OPENAI_MODEL;
   const systemPrompt =
-    "You are an elite options-wheel strategist and plain-English coach.\n" +
+    "You are an elite options-wheel strategist, market analyst, and plain-English coach.\n" +
     "Output ONLY valid JSON using EXACT prices provided. Never invent prices.\n" +
     'For each optionPosition also output:\n- "markPnl": profit/loss if I buy-to-close right now\n- "wheelPnl": profit if I let it go to expiry/assignment\n' +
     'Add to summary:\n- "netMarkToMarket": total P/L today (stock + options mark)\n- "netWheelOutcome": projected P/L if all short calls assign/expire\n' +
-    "For the recommendations section:\n- Fill in the plainEnglishSummary with clear, actionable language\n- Provide specific recommendations in rollAnalysis for each position\n- Use everyday language, no jargon unless explained\n- Focus on what to DO, not theory";
+    "For the recommendations section:\n- Fill in the plainEnglishSummary with clear, actionable language\n- Provide specific recommendations in rollAnalysis for each position\n- Use everyday language, no jargon unless explained\n- Focus on what to DO, not theory\n" +
+    "For market sentiment analysis:\n- Analyze ETF flows when dealing with crypto assets (IBIT, ETH ETFs)\n- Check NAV premium/discount for ETF products\n- Evaluate implied volatility levels and options skew\n- Track large options flow and open interest patterns\n- Identify upcoming catalysts that affect trading decisions";
 
   const res = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -161,11 +162,16 @@ Deno.serve(async (req) => {
           portfolio,
           chartMetrics = [],
           priceContext,
-          optionGreeks = {} } = body ?? {};
+          optionGreeks = {},
+          marketData = {} } = body ?? {};
 
   if (!ticker) return json({ success: false, error: "ticker required" }, 400);
   if (!OPENAI_API_KEY)
     return json({ success: false, error: "Missing OpenAI key" }, 500);
+  
+  // Define crypto ETF tickers for enhanced analysis
+  const cryptoETFs = ['IBIT', 'ETH', 'ETHA', 'GBTC', 'BITO', 'BITQ', 'ARKB', 'FBTC', 'HODL', 'BTCO', 'EZBC', 'BTCR'];
+  const isCryptoETF = cryptoETFs.includes(ticker.toUpperCase());
   
   // 🔍 FILTER PORTFOLIO FOR CURRENT TICKER ONLY
   // This prevents issues when portfolio has multiple tickers (NVDA, etc)
@@ -431,6 +437,23 @@ Deno.serve(async (req) => {
   const macd = firstMetric?.macd || 'Unknown';  
   const trend = firstMetric?.trend || 'Unknown';
 
+  // 📊 PREPARE MARKET DATA FOR ANALYSIS
+  // Extract real market data from marketData object (passed from frontend)
+  const etfFlows = marketData.etfFlows || {};
+  const navData = marketData.navData || {};
+  const volatilityData = marketData.volatility || {};
+  const optionsFlowData = marketData.optionsFlow || {};
+  const upcomingEvents = marketData.upcomingEvents || [];
+  
+  // Calculate key market metrics
+  const currentDate = new Date().toISOString().split('T')[0];
+  const nextFedMeeting = marketData.nextFedMeeting || "2025-01-29"; // FOMC Jan 28-29, 2025
+  const tripleWitching = marketData.tripleWitching || "2025-12-19"; // Dec 19, 2025
+  
+  // Get actual IV from Greeks or estimate
+  const currentIV = currentOptionPositions.length > 0 && currentOptionPositions[0].iv 
+    ? (currentOptionPositions[0].iv * 100).toFixed(1) + '%'
+    : volatilityData.currentIV || "Moderate";
 
   // Build comprehensive WHEEL STRATEGY prompt
   const prompt = `
@@ -473,6 +496,25 @@ TASK: For each position above, provide wheel strategy analysis:
 TECHNICAL DATA:
 • RSI: ${rsi}, MACD: ${macd}, Trend: ${trend}
 • Available Strike Prices: ${[...resistances.map(r => r.price), ...supports.map(s => s.price)].join(', ')}
+
+MARKET CONTEXT DATA:
+${isCryptoETF ? `• ETF Net Flows: ${etfFlows.netFlow || 'No data'}
+• NAV Premium/Discount: ${navData.premium || navData.discount || 'No data'}` : '• Non-ETF asset'}
+• Current IV: ${currentIV}
+• IV Rank: ${volatilityData.ivRank || 'Unknown'}
+• Options Flow: ${optionsFlowData.sentiment || 'Neutral'}
+• Put/Call Ratio: ${optionsFlowData.pcRatio || 'Balanced'}
+• Upcoming Events:
+  - Fed Meeting: ${nextFedMeeting}
+  - Triple Witching: ${tripleWitching}
+  ${upcomingEvents.map((e: any) => `- ${e.event}: ${e.date}`).join('\n  ')}
+
+INSTRUCTIONS:
+1. Analyze the provided market data to give specific, actionable insights
+2. For marketSentiment fields, provide analysis based on the actual data above
+3. Do NOT generate placeholder text like "check schedule" or "analyze flows"
+4. If data is missing, state "No data available" rather than generic instructions
+5. Focus on how the market conditions affect wheel strategy execution
 
 Return this JSON structure:
 {
@@ -558,6 +600,58 @@ Return this JSON structure:
     "Specific wheel strategy action using provided prices only"
   ],
   "optionsStrategy": "Describe specific ${hasPosition ? 'covered call' : 'cash-secured put'} recommendation",
+  "marketSentiment": {
+    "etfFlows": {
+      "netFlows": "${isCryptoETF ? (etfFlows.netFlow || 'No flow data available') : 'N/A for non-ETF'}",
+      "trend": "${isCryptoETF ? (etfFlows.trend || 'Analyze flow direction') : 'N/A'}",
+      "impact": "${isCryptoETF ? (etfFlows.impact || 'Assess impact on spot price') : 'N/A'}",
+      "recommendation": "${isCryptoETF ? 'Adjust strategy based on flows' : 'Focus on technical levels'}"
+    },
+    "navAnalysis": {
+      "premium": "${isCryptoETF ? (navData.premium || 'No NAV data') : 'N/A for non-ETF'}",
+      "discount": "${isCryptoETF ? (navData.discount || 'No NAV data') : 'N/A'}",
+      "interpretation": "${isCryptoETF ? 'Analyze NAV divergence' : 'N/A'}",
+      "tradingOpportunity": "${isCryptoETF ? 'Look for mean reversion' : 'N/A'}"
+    },
+    "volatilityMetrics": {
+      "currentIV": "${currentIV}",
+      "ivRank": "${volatilityData.ivRank || 'Calculate from 52-week range'}",
+      "callPutSkew": "${volatilityData.skew || 'Analyze options skew'}",
+      "premiumEnvironment": "${Number(currentIV) > 50 ? 'Rich - good for selling' : 'Moderate - balanced approach'}",
+      "wheelStrategy": "IV at ${currentIV} suggests ${Number(currentIV) > 50 ? 'aggressive premium collection' : 'standard wheel execution'}"
+    },
+    "optionsFlow": {
+      "largeOrders": "${optionsFlowData.largeOrders || 'No unusual activity detected'}",
+      "openInterest": "${optionsFlowData.openInterest || 'Standard OI distribution'}",
+      "putCallRatio": "${optionsFlowData.pcRatio || 'Balanced'}",
+      "sentiment": "${optionsFlowData.sentiment || 'Neutral'}"
+    },
+    "upcomingCatalysts": [
+      {
+        "event": "Fed Meeting (FOMC)",
+        "date": "${nextFedMeeting}",
+        "impact": "High - affects all risk assets",
+        "preparation": "Consider reducing position size before announcement"
+      },
+      {
+        "event": "Triple Witching",
+        "date": "${tripleWitching}",
+        "impact": "High - increased volatility",
+        "preparation": "Premium collection opportunities due to elevated IV"
+      },
+      ${upcomingEvents.length > 0 ? upcomingEvents.map((e: any) => `{
+        "event": "${e.event || 'Unknown'}",
+        "date": "${e.date || 'TBD'}",
+        "impact": "${e.impact || 'Medium'}",
+        "preparation": "${e.preparation || 'Monitor closely'}"
+      }`).join(',') : ''}
+    ],
+    "overallSentiment": {
+      "summary": "Based on ${currentIV} IV, ${isCryptoETF ? 'ETF flows, ' : ''}and upcoming ${nextFedMeeting} Fed meeting, market conditions ${Number(currentIV) > 50 ? 'favor aggressive premium selling' : 'suggest standard wheel approach'}",
+      "confidence": "${marketData.confidence || 'Medium'}",
+      "recommendation": "Continue wheel strategy with ${Number(currentIV) > 50 ? 'wider strikes for safety' : 'standard strike selection'}"
+    }
+  },
   "recommendations": {
     "positionSnapshot": [
       {
@@ -763,6 +857,16 @@ Return this JSON structure:
         keyMessage: analysis.summary?.keyMessage
       });
 
+      // 📊 MARKET SENTIMENT RESPONSE LOGGING
+      console.log('📊 [MARKET SENTIMENT DEBUG] AI Generated:', {
+        etfFlows: analysis.marketSentiment?.etfFlows,
+        navAnalysis: analysis.marketSentiment?.navAnalysis,
+        volatilityMetrics: analysis.marketSentiment?.volatilityMetrics,
+        optionsFlow: analysis.marketSentiment?.optionsFlow,
+        upcomingCatalysts: analysis.marketSentiment?.upcomingCatalysts,
+        overallSentiment: analysis.marketSentiment?.overallSentiment
+      });
+
       // 🔧 Merge reliable Greeks from payload into AI output (LLM can drop fields)
       try {
         const positions = analysis?.wheelStrategy?.currentPositions as Array<Record<string, unknown>> | undefined;
@@ -860,6 +964,14 @@ Return this JSON structure:
       // checks specific fields (entry/exit prices) rather than the entire response.
       
       /* ───────── End numeric validator ───────── */
+
+    // 📤 LOG FINAL RESPONSE BEFORE SENDING
+    console.log('📤 [FINAL RESPONSE] Sending to frontend:', {
+      hasMarketSentiment: !!analysis.marketSentiment,
+      marketSentimentKeys: analysis.marketSentiment ? Object.keys(analysis.marketSentiment) : [],
+      ticker: ticker,
+      wheelPhase: analysis.wheelStrategy?.currentPhase
+    });
 
     return json({ success: true, analysis, confidence: analysis.confidence });
   } catch (err) {

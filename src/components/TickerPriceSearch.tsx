@@ -547,14 +547,7 @@ export function TickerPriceSearch({
         const currentPrice = eod?.close || 0;
         const ticker = eod?.symbol || '';
         
-        // Get current IV from Greeks if available
-        let currentIV: number | undefined;
-        if (greeksMap.size > 0) {
-            const firstGreek = Array.from(greeksMap.values())[0];
-            currentIV = firstGreek?.iv;
-        }
-        
-        const marketData = await MarketDataFetcher.fetchMarketData(ticker, currentPrice, currentIV);
+        const marketData = await MarketDataFetcher.fetchMarketData(ticker, currentPrice);
         console.log('📊 [MARKET DATA] Fetched for analysis:', marketData);
 
         // Ensure option positions in payload use same key format as greeksMap

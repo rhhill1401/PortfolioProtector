@@ -342,7 +342,14 @@ Deno.serve(async (req) => {
     optionPositions.filter((opt: Record<string, unknown>) => (opt.symbol as string)?.startsWith(ticker));
   
   const totalPremiumCollected = currentOptionPositions.reduce((total: number, opt: Record<string, unknown>) => {
-    const prem = Number(opt.premiumCollected) || 0;
+    let prem = Number(opt.premiumCollected) || 0;
+    const cnt = Math.abs(Number(opt.contracts) || 1);
+    
+    // Apply same conversion logic as in calcOptionMetrics
+    if (prem > 0 && prem < 100) {
+      prem = prem * 100 * cnt; // Convert per-share to total premium
+    }
+    
     return total + prem;
   }, 0);
   

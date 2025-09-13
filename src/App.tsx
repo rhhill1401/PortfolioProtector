@@ -4,6 +4,7 @@ import {useState} from 'react';
 // Import the new component placeholder (we'll create it next)
 import {StockAnalysis} from './components/StockAnalysis';
 import {PolygonTester} from './components/PolygonTester';
+import {TestWebSearch} from './components/TestWebSearch';
 import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
 	
 	// Check if we're in test mode via URL param
 	const isTestMode = window.location.search.includes('test=polygon');
+	const isWebSearchTest = window.location.search.includes('test=websearch');
 
 	return (
 		<div className='flex flex-col min-h-screen w-screen bg-white text-gray-900 overflow-x-hidden'>
@@ -35,7 +37,9 @@ function App() {
 			</header>
 
 			<main className='flex-grow w-full py-8'>
-				{isTestMode ? (
+				{isWebSearchTest ? (
+					<TestWebSearch />
+				) : isTestMode ? (
 					<PolygonTester />
 				) : (
 					<div className='container mx-auto px-4 flex flex-col md:flex-row gap-6 h-full'>

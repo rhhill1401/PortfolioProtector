@@ -193,15 +193,9 @@ Deno.serve(async (req) => {
   }
   
   function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number, greeks?: OptionQuote): CalculatedOption {
-    // Handle premium - could be per-share or total depending on source
-    let prem = Number(opt.premiumCollected) || 0;
+    // Handle premium - trust the value from portfolio-vision, it's already in total format
+    const prem = Number(opt.premiumCollected) || 0;
     const cnt  = Math.abs(Number(opt.contracts) || 1);
-    
-    // If premium seems too small (< $100), it's likely per-share and needs conversion
-    if (prem > 0 && prem < 100) {
-      prem = prem * 100 * cnt; // Convert per-share to total premium
-      console.log(`📊 Converted premium from per-share $${(prem / (100 * cnt)).toFixed(2)} to total $${prem.toFixed(2)}`);
-    }
     
     const cur  = Number(opt.currentValue) || 0;
     const strike = Number(opt.strike) || 0;

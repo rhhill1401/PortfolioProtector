@@ -11,6 +11,7 @@ import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import axios from 'axios';
 import { useOptionChain } from '@/hooks/useOptionChain';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
+import { useMarketContext } from '@/hooks/useMarketContext';
 import { 
 	compounding,
 	estimateAssignmentProb
@@ -74,12 +75,20 @@ interface MarketSentiment {
 		trend: string;
 		impact: string;
 		recommendation: string;
+		source?: {
+			url: string;
+			asOf: string;
+		};
 	};
 	navAnalysis?: {
 		premium: string;
 		discount: string;
 		interpretation: string;
 		tradingOpportunity: string;
+		source?: {
+			url: string;
+			asOf: string;
+		};
 	};
 	volatilityMetrics?: {
 		currentIV: string;
@@ -99,7 +108,11 @@ interface MarketSentiment {
 		date: string;
 		impact: string;
 		preparation: string;
-	}>;
+		source?: {
+			url: string;
+			asOf: string;
+		};
+	}> | string;
 	overallSentiment?: {
 		summary: string;
 		confidence: string;
@@ -323,6 +336,9 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const fmtTheta = (theta: number | null | undefined): string => fmtNoLeadZero(theta, 2);
 	
 	const { data: optionChainData } = useOptionChain(tickerSymbol);
+	
+	// Fetch market context data independently
+	const { marketData: marketContextData, loading: marketContextLoading } = useMarketContext(tickerSymbol);
 	
 	// Fetch real-time quotes for wheel positions
 	// Convert date format from 'Jul-18-2025' to '2025-07-18' for API compatibility
@@ -1721,18 +1737,30 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 
 						{/* Market Context Tab Content */}
 						<TabsContent value='market-context' className='space-y-4'>
+							{/* Loading state */}
+							{marketContextLoading && (
+								<Card>
+									<CardContent className="py-8 text-center">
+										<p className="text-gray-500">Loading market context...</p>
+									</CardContent>
+								</Card>
+							)}
+							
+							{/* Market data loaded */}
+							{!marketContextLoading && marketContextData && (
+								<>
 							{/* Overall Market Sentiment */}
-							{displayData.marketSentiment?.overallSentiment && (
+							{marketContextData?.overallSentiment && (
 								<Card>
 									<CardHeader>
 										<CardTitle>Market Sentiment Overview</CardTitle>
 									</CardHeader>
 									<CardContent>
 										<div className="space-y-2">
-											<p className="text-sm">{displayData.marketSentiment.overallSentiment.summary}</p>
+											<p className="text-sm">{marketContextData.overallSentiment.summary}</p>
 											<div className="flex justify-between items-center mt-2">
-												<span className="text-xs text-gray-500">Confidence: {displayData.marketSentiment.overallSentiment.confidence}</span>
-												<span className="text-sm font-medium text-blue-600">{displayData.marketSentiment.overallSentiment.recommendation}</span>
+												<span className="text-xs text-gray-500">Confidence: {marketContextData.overallSentiment.confidence}</span>
+												<span className="text-sm font-medium text-blue-600">{marketContextData.overallSentiment.recommendation}</span>
 											</div>
 										</div>
 									</CardContent>
@@ -1740,7 +1768,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							)}
 
 							{/* ETF Flows (for crypto assets) */}
-							{displayData.marketSentiment?.etfFlows && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH') && (
+							{marketContextData?.etfFlows && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH' || tickerSymbol === 'ETHA') && (
 								<Card>
 									<CardHeader>
 										<CardTitle>ETF Flow Analysis</CardTitle>
@@ -1750,27 +1778,40 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<div className="grid grid-cols-2 gap-4">
 											<div>
 												<p className="text-xs text-gray-500">Net Flows</p>
-												<p className="font-medium">{displayData.marketSentiment.etfFlows.netFlows}</p>
+												<p className="font-medium">{marketContextData.etfFlows.netFlows}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">Trend</p>
-												<p className="font-medium">{displayData.marketSentiment.etfFlows.trend}</p>
+												<p className="font-medium">{marketContextData.etfFlows.trend}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Impact</p>
-												<p className="text-sm">{displayData.marketSentiment.etfFlows.impact}</p>
+												<p className="text-sm">{marketContextData.etfFlows.impact}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Recommendation</p>
-												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.etfFlows.recommendation}</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.etfFlows.recommendation}</p>
 											</div>
+											{marketContextData.etfFlows.source?.url && (
+												<div className="col-span-2 mt-2 pt-2 border-t">
+													<p className="text-xs text-gray-400">
+														As of {marketContextData.etfFlows.source.asOf} • 
+														<a href={marketContextData.etfFlows.source.url} 
+														   target="_blank" 
+														   rel="noopener noreferrer"
+														   className="text-blue-500 hover:underline">
+															Source
+														</a>
+													</p>
+												</div>
+											)}
 										</div>
 									</CardContent>
 								</Card>
 							)}
 
 							{/* NAV Analysis (for ETFs) */}
-							{displayData.marketSentiment?.navAnalysis && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH') && (
+							{marketContextData?.navAnalysis && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH' || tickerSymbol === 'ETHA') && (
 								<Card>
 									<CardHeader>
 										<CardTitle>NAV Premium/Discount</CardTitle>
@@ -1780,27 +1821,40 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<div className="grid grid-cols-2 gap-4">
 											<div>
 												<p className="text-xs text-gray-500">Premium</p>
-												<p className="font-medium">{displayData.marketSentiment.navAnalysis.premium}</p>
+												<p className="font-medium">{marketContextData.navAnalysis.premium}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">Discount</p>
-												<p className="font-medium">{displayData.marketSentiment.navAnalysis.discount}</p>
+												<p className="font-medium">{marketContextData.navAnalysis.discount}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Interpretation</p>
-												<p className="text-sm">{displayData.marketSentiment.navAnalysis.interpretation}</p>
+												<p className="text-sm">{marketContextData.navAnalysis.interpretation}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Trading Opportunity</p>
-												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.navAnalysis.tradingOpportunity}</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.navAnalysis.tradingOpportunity}</p>
 											</div>
+											{marketContextData.navAnalysis.source?.url && (
+												<div className="col-span-2 mt-2 pt-2 border-t">
+													<p className="text-xs text-gray-400">
+														As of {marketContextData.navAnalysis.source.asOf} • 
+														<a href={marketContextData.navAnalysis.source.url} 
+														   target="_blank" 
+														   rel="noopener noreferrer"
+														   className="text-blue-500 hover:underline">
+															Source
+														</a>
+													</p>
+												</div>
+											)}
 										</div>
 									</CardContent>
 								</Card>
 							)}
 
 							{/* Volatility Metrics */}
-							{displayData.marketSentiment?.volatilityMetrics && (
+							{marketContextData?.volatilityMetrics && (
 								<Card>
 									<CardHeader>
 										<CardTitle>Volatility Analysis</CardTitle>
@@ -1810,23 +1864,23 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<div className="grid grid-cols-2 gap-4">
 											<div>
 												<p className="text-xs text-gray-500">Current IV</p>
-												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.currentIV}</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.currentIV}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">IV Rank</p>
-												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.ivRank}</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.ivRank}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">Call/Put Skew</p>
-												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.callPutSkew}</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.callPutSkew}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">Premium Environment</p>
-												<p className="font-medium">{displayData.marketSentiment.volatilityMetrics.premiumEnvironment}</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.premiumEnvironment}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Wheel Strategy Impact</p>
-												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.volatilityMetrics.wheelStrategy}</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.volatilityMetrics.wheelStrategy}</p>
 											</div>
 										</div>
 									</CardContent>
@@ -1834,7 +1888,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							)}
 
 							{/* Options Flow */}
-							{displayData.marketSentiment?.optionsFlow && (
+							{marketContextData?.optionsFlow && (
 								<Card>
 									<CardHeader>
 										<CardTitle>Options Flow & Positioning</CardTitle>
@@ -1844,19 +1898,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<div className="grid grid-cols-2 gap-4">
 											<div>
 												<p className="text-xs text-gray-500">Large Orders</p>
-												<p className="text-sm">{displayData.marketSentiment.optionsFlow.largeOrders}</p>
+												<p className="text-sm">{marketContextData.optionsFlow.largeOrders}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">Put/Call Ratio</p>
-												<p className="text-sm">{displayData.marketSentiment.optionsFlow.putCallRatio}</p>
+												<p className="text-sm">{marketContextData.optionsFlow.putCallRatio}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Open Interest</p>
-												<p className="text-sm">{displayData.marketSentiment.optionsFlow.openInterest}</p>
+												<p className="text-sm">{marketContextData.optionsFlow.openInterest}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Market Sentiment</p>
-												<p className="text-sm font-medium text-blue-600">{displayData.marketSentiment.optionsFlow.sentiment}</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.optionsFlow.sentiment}</p>
 											</div>
 										</div>
 									</CardContent>
@@ -1864,27 +1918,43 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							)}
 
 							{/* Upcoming Catalysts */}
-							{displayData.marketSentiment?.upcomingCatalysts && displayData.marketSentiment.upcomingCatalysts.length > 0 && (
+							{marketContextData?.upcomingCatalysts && (
 								<Card>
 									<CardHeader>
 										<CardTitle>Upcoming Catalysts</CardTitle>
 										<CardDescription>Events that may impact volatility and premiums</CardDescription>
 									</CardHeader>
 									<CardContent>
-										<div className="space-y-3">
-											{displayData.marketSentiment.upcomingCatalysts.map((catalyst, idx) => (
-												<div key={idx} className="border-l-2 border-blue-500 pl-3">
-													<div className="flex justify-between items-start">
-														<div>
-															<p className="font-medium text-sm">{catalyst.event}</p>
-															<p className="text-xs text-gray-500">Date: {catalyst.date}</p>
-															<p className="text-xs text-gray-500">Impact: {catalyst.impact}</p>
+										{typeof marketContextData.upcomingCatalysts === 'string' ? (
+											<p className="text-sm text-gray-600">
+												{marketContextData.upcomingCatalysts}
+											</p>
+										) : (
+											<div className="space-y-3">
+												{marketContextData.upcomingCatalysts.map((catalyst, idx) => (
+													<div key={idx} className="border-l-2 border-blue-500 pl-3">
+														<div className="flex justify-between items-start">
+															<div>
+																<p className="font-medium text-sm">{catalyst.event}</p>
+																<p className="text-xs text-gray-500">Date: {catalyst.date}</p>
+																<p className="text-xs text-gray-500">Impact: {catalyst.impact}</p>
+															</div>
 														</div>
+														<p className="text-sm mt-1">{catalyst.preparation}</p>
+														{catalyst.source?.url && (
+															<p className="text-xs text-gray-400 mt-1">
+																Source: <a href={catalyst.source.url} 
+																	target="_blank" 
+																	rel="noopener noreferrer"
+																	className="text-blue-500 hover:underline">
+																	{catalyst.source.url.replace(/^https?:\/\//, '').split('/')[0]}
+																</a>
+															</p>
+														)}
 													</div>
-													<p className="text-sm mt-1">{catalyst.preparation}</p>
-												</div>
-											))}
-										</div>
+												))}
+											</div>
+										)}
 									</CardContent>
 								</Card>
 							)}
@@ -1918,6 +1988,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										</table>
 									</CardContent>
 								</Card>
+							)}
+								</>
 							)}
 						</TabsContent>
 

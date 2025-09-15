@@ -2,6 +2,12 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const POLYGON_API_KEY = Deno.env.get("POLYGON_API_KEY");
 
+// ETF URL mappings for iShares products
+const ETF_URLS: Record<string, string> = {
+  'IBIT': 'https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf',
+  'ETHA': 'https://www.ishares.com/us/products/337614/ishares-ethereum-trust-etf'
+};
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
@@ -39,7 +45,7 @@ interface NavResponse {
 }
 
 /**
- * Get IBIT market price from Polygon API
+ * Get ETF market price from Polygon API
  */
 async function getMarketPrice(ticker: string): Promise<{ price: number | null; priceAsOf: string }> {
   try {
@@ -86,7 +92,13 @@ async function getMarketPrice(ticker: string): Promise<{ price: number | null; p
  * We'll fetch the page and look for NAV in the HTML
  */
 async function getNavFromIShares(ticker: string): Promise<{ nav: number | null; navAsOf: string; sourceUrl: string }> {
-  const productUrl = "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf";
+  // Get the appropriate iShares product page URL
+  const productUrl = ETF_URLS[ticker.toUpperCase()];
+  
+  if (!productUrl) {
+    console.log(`⚠️ [NAV] No URL mapping for ticker ${ticker}`);
+    return { nav: null, navAsOf: new Date().toISOString().split('T')[0], sourceUrl: '' };
+  }
   
   try {
     console.log(`📊 [NAV] Fetching iShares page for NAV`);
@@ -150,15 +162,15 @@ async function getNavFromIShares(ticker: string): Promise<{ nav: number | null; 
     const asOfMatch = html.match(/as\s+of[^0-9]*([\d\/\-]+)/i);
     const navAsOf = asOfMatch ? new Date(asOfMatch[1]).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
     
-    // If we couldn't find NAV and it's IBIT, it typically trades very close to market price
-    // As a fallback for IBIT, we can look for the first price on the page which is usually NAV
-    if (!nav && ticker === "IBIT") {
+    // If we couldn't find NAV and it's a supported ETF, try fallback pattern
+    // As a fallback for supported ETFs, we can look for the first price on the page which is usually NAV
+    if (!nav && ETF_URLS[ticker.toUpperCase()]) {
       const priceMatch = html.match(/\$([0-9]+\.[0-9]+)/);
       if (priceMatch && priceMatch[1]) {
         const potentialNav = parseFloat(priceMatch[1]);
         if (!isNaN(potentialNav) && potentialNav > 30 && potentialNav < 200) {
           nav = potentialNav;
-          console.log(`✅ [NAV] Found price (likely NAV) for IBIT: $${nav}`);
+          console.log(`✅ [NAV] Found price (likely NAV) for ${ticker}: $${nav}`);
         }
       }
     }
@@ -235,10 +247,9 @@ function computePremiumDiscount(marketPrice: number | null, nav: number | null):
 }
 
 /**
- * Main function to fetch IBIT NAV data
+ * Main function to fetch ETF NAV data
  */
-async function fetchIBITNav(debug: boolean = false): Promise<NavResponse> {
-  const ticker = "IBIT";
+async function fetchETFNav(ticker: string, debug: boolean = false): Promise<NavResponse> {
   
   try {
     console.log(`📊 [NAV-PREMIUM] Starting data fetch for ${ticker}`);
@@ -344,11 +355,12 @@ Deno.serve(async (req) => {
       });
     }
     
-    // For now, only support IBIT
-    if (ticker.toUpperCase() !== "IBIT") {
+    // Check if ticker is supported
+    const tickerUpper = ticker.toUpperCase();
+    if (!ETF_URLS[tickerUpper]) {
       return new Response(JSON.stringify({ 
         success: false, 
-        error: "Only IBIT is currently supported" 
+        error: `Ticker ${ticker} is not supported. Supported tickers: ${Object.keys(ETF_URLS).join(', ')}` 
       }), { 
         status: 400,
         headers: { "Content-Type": "application/json", ...cors }
@@ -368,7 +380,7 @@ Deno.serve(async (req) => {
     }
     
     // Fetch fresh data
-    const result = await fetchIBITNav(debug);
+    const result = await fetchETFNav(ticker.toUpperCase(), debug);
     
     // Cache successful results
     if (result.success && result.navAnalysis) {

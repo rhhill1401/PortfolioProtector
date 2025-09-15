@@ -219,7 +219,7 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
         ...(debug ? {
           debug: {
             usedUrl: [
-              "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+              ETF_URLS[ticker.toUpperCase()] || '',
               `${SUPABASE_URL}/functions/v1/nav-premium`
             ],
             soToday,
@@ -302,7 +302,7 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
       ...(debug ? {
         debug: {
           usedUrl: [
-            "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+            ETF_URLS[ticker.toUpperCase()] || '',
             `${SUPABASE_URL}/functions/v1/nav-premium`
           ],
           soToday,
@@ -332,7 +332,7 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
       },
       ...(debug ? {
         debug: {
-          usedUrl: ["https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf"],
+          usedUrl: [ETF_URLS[ticker.toUpperCase()] || ''],
           soToday: null,
           soPrev: null,
           navToday: null,

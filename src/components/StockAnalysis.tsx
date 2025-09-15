@@ -12,6 +12,7 @@ import axios from 'axios';
 import { useOptionChain } from '@/hooks/useOptionChain';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
 import { useMarketContext } from '@/hooks/useMarketContext';
+import { useEtfFlows } from '@/hooks/useEtfFlows';
 import { 
 	compounding,
 	estimateAssignmentProb
@@ -339,6 +340,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	
 	// Fetch market context data independently
 	const { marketData: marketContextData, loading: marketContextLoading } = useMarketContext(tickerSymbol);
+	
+	// Fetch ETF flows separately for supported tickers
+	const { data: etfFlowsData, loading: etfFlowsLoading } = useEtfFlows(
+		(tickerSymbol === 'IBIT' || tickerSymbol === 'ETHA') ? tickerSymbol : null
+	);
 	
 	// Fetch real-time quotes for wheel positions
 	// Convert date format from 'Jul-18-2025' to '2025-07-18' for API compatibility
@@ -1768,44 +1774,49 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							)}
 
 							{/* ETF Flows (for crypto assets) */}
-							{marketContextData?.etfFlows && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH' || tickerSymbol === 'ETHA') && (
+							{(tickerSymbol === 'IBIT' || tickerSymbol === 'ETHA') && (
 								<Card>
 									<CardHeader>
 										<CardTitle>ETF Flow Analysis</CardTitle>
 										<CardDescription>Net inflows/outflows and impact on spot price</CardDescription>
 									</CardHeader>
 									<CardContent>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<p className="text-xs text-gray-500">Net Flows</p>
-												<p className="font-medium">{marketContextData.etfFlows.netFlows}</p>
-											</div>
-											<div>
-												<p className="text-xs text-gray-500">Trend</p>
-												<p className="font-medium">{marketContextData.etfFlows.trend}</p>
-											</div>
-											<div className="col-span-2">
-												<p className="text-xs text-gray-500">Impact</p>
-												<p className="text-sm">{marketContextData.etfFlows.impact}</p>
-											</div>
-											<div className="col-span-2">
-												<p className="text-xs text-gray-500">Recommendation</p>
-												<p className="text-sm font-medium text-blue-600">{marketContextData.etfFlows.recommendation}</p>
-											</div>
-											{marketContextData.etfFlows.source?.url && (
-												<div className="col-span-2 mt-2 pt-2 border-t">
-													<p className="text-xs text-gray-400">
-														As of {marketContextData.etfFlows.source.asOf} • 
-														<a href={marketContextData.etfFlows.source.url} 
-														   target="_blank" 
-														   rel="noopener noreferrer"
-														   className="text-blue-500 hover:underline">
-															Source
-														</a>
-													</p>
+										{etfFlowsLoading ? (
+											<div className="text-sm text-gray-500">Loading flow data...</div>
+										) : (
+											<div className="grid grid-cols-2 gap-4">
+												<div>
+													<p className="text-xs text-gray-500">Net Flows</p>
+													<p className="font-medium">{etfFlowsData?.netFlows || 'Live data not available'}</p>
 												</div>
-											)}
-										</div>
+												<div>
+													<p className="text-xs text-gray-500">Trend</p>
+													<p className="font-medium">{etfFlowsData?.trend || 'Live data not available'}</p>
+												</div>
+												<div className="col-span-2">
+													<p className="text-xs text-gray-500">Impact</p>
+													<p className="text-sm">{etfFlowsData?.impact || 'Live data not available'}</p>
+												</div>
+												<div className="col-span-2">
+													<p className="text-xs text-gray-500">Recommendation</p>
+													<p className="text-sm font-medium text-blue-600">{etfFlowsData?.recommendation || 'Hold or size conservatively until clear flow trends emerge'}</p>
+												</div>
+												{/* Always show Source and As Of */}
+												{etfFlowsData?.source && (
+													<div className="col-span-2 mt-2 pt-2 border-t">
+														<p className="text-xs text-gray-400">
+															As of {etfFlowsData.source.asOf} • 
+															<a href={etfFlowsData.source.url} 
+															   target="_blank" 
+															   rel="noopener noreferrer"
+															   className="text-blue-500 hover:underline">
+																Source
+															</a>
+														</p>
+													</div>
+												)}
+											</div>
+										)}
 									</CardContent>
 								</Card>
 							)}
@@ -1821,19 +1832,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<div className="grid grid-cols-2 gap-4">
 											<div>
 												<p className="text-xs text-gray-500">Premium</p>
-												<p className="font-medium">{marketContextData.navAnalysis.premium}</p>
+												<p className="font-medium">{marketContextData.navAnalysis.premium || 'Live data not available'}</p>
 											</div>
 											<div>
 												<p className="text-xs text-gray-500">Discount</p>
-												<p className="font-medium">{marketContextData.navAnalysis.discount}</p>
+												<p className="font-medium">{marketContextData.navAnalysis.discount || 'Live data not available'}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Interpretation</p>
-												<p className="text-sm">{marketContextData.navAnalysis.interpretation}</p>
+												<p className="text-sm">{marketContextData.navAnalysis.interpretation || 'Live data not available'}</p>
 											</div>
 											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Trading Opportunity</p>
-												<p className="text-sm font-medium text-blue-600">{marketContextData.navAnalysis.tradingOpportunity}</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.navAnalysis.tradingOpportunity || 'Live data not available'}</p>
 											</div>
 											{marketContextData.navAnalysis.source?.url && (
 												<div className="col-span-2 mt-2 pt-2 border-t">

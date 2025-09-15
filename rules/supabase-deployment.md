@@ -11,15 +11,15 @@ Deploy commands were hanging without useful errors. This rule codifies the fix s
 
 ### Required Steps
 1) Authenticate first if not already logged in:
-   - `supabase login`
+  - `supabase login`
 2) Always use API bundling for deploy/build commands:
-   - `--use-api`
+  - `--use-api`
 
 ### Standard Commands
 - Deploy all functions:
-  - `supabase functions deploy --use-api`
+- `supabase functions deploy --use-api`
 - Deploy a single function:
-  - `supabase functions deploy <name> --use-api`
+- `supabase functions deploy <name> --use-api`
 
 ### NPM Scripts (expected)
 Project scripts should wrap the correct flags so local devs and CI do not need to remember them.

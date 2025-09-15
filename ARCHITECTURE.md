@@ -26,7 +26,7 @@ PortfolioProtector is a real-time market analysis platform that combines AI-powe
                          │ External APIs
 ┌────────────────────────┴────────────────────────────────────┐
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │OpenAI GPT-4  │  │Polygon.io    │  │Marketstack   │      │
+│  │OpenAI GPT-5  │  │Polygon.io    │  │Marketstack   │      │
 │  └──────────────┘  └──────────────┘  └──────────────┘      │
 └─────────────────────────────────────────────────────────────┘
 ```

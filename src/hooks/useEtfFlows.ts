@@ -67,13 +67,17 @@ export function useEtfFlows(ticker: string | null): UseETFFlowsReturn {
         setData(response.data.etfFlows);
       } else {
         // If no data but successful response, set data with source info
+        const defaultUrl = ticker.toUpperCase() === 'ETHA' 
+          ? 'https://www.ishares.com/us/products/337614/ishares-ethereum-trust-etf'
+          : 'https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf';
+        
         setData({
           netFlows: null,
           trend: null,
           impact: null,
           recommendation: null,
           source: response.data.etfFlows?.source || {
-            url: 'https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf',
+            url: defaultUrl,
             asOf: new Date().toISOString().split('T')[0]
           }
         });

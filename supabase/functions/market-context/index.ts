@@ -9,42 +9,61 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
 };
 
-interface MarketData {
-  navAnalysis?: {
-    premium: string | null;
-    discount: string | null;
-    interpretation: string | null;
-    tradingOpportunity: string | null;
-    source?: { url: string; asOf: string };
-  };
-  volatilityMetrics?: {
-    currentIV: string | null;
-    ivRank: string | null;
-    callPutSkew: string | null;
-    premiumEnvironment: string | null;
-    wheelStrategy: string | null;
-  };
-  optionsFlow?: {
-    largeOrders: string | null;
-    putCallRatio: string | null;
-    openInterest: string | null;
-    sentiment: string | null;
-  };
-  upcomingCatalysts?: Array<{
-    event: string;
-    date: string;
-    impact: string;
-    recommendation: string;
-    source?: { url: string; asOf: string };
-  }>;
+// Helper function to fetch ETF Flow data from our dedicated etf-flows service
+async function fetchETFFlowData(ticker: string): Promise<{ 
+  netFlows: string | null; 
+  trend: string | null; 
+  impact: string | null;
+  recommendation: string | null;
+  source: { url: string; asOf: string } | null;
+}> {
+  try {
+    console.log(`📊 [FETCH-FLOWS] Fetching from etf-flows service for ${ticker}`);
+    
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/etf-flows`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({ ticker })
+    });
+    
+    if (!response.ok) {
+      console.log(`⚠️ [FETCH-FLOWS] Failed to fetch ETF flows: ${response.status}`);
+      return { netFlows: null, trend: null, impact: null, recommendation: null, source: null };
+    }
+    
+    const data = await response.json();
+    console.log(`📊 [FETCH-FLOWS] Response:`, data);
+    
+    if (data.success && data.etfFlows) {
+      return {
+        netFlows: data.etfFlows.netFlows || null,
+        trend: data.etfFlows.trend || null,
+        impact: data.etfFlows.impact || null,
+        recommendation: data.etfFlows.recommendation || null,
+        source: data.etfFlows.source || null
+      };
+    }
+    
+    return { netFlows: null, trend: null, impact: null, recommendation: null, source: null };
+  } catch (error) {
+    console.error(`❌ [FETCH-FLOWS] Error:`, error);
+    return { netFlows: null, trend: null, impact: null, recommendation: null, source: null };
+  }
 }
 
 // Helper function to fetch NAV data from our dedicated nav-premium service
-async function fetchNAVData(ticker: string): Promise<{ premium: string | null; discount: string | null; source: string | null }> {
+async function fetchNAVData(ticker: string): Promise<{ 
+  premium: string | null; 
+  discount: string | null; 
+  source: string | null 
+}> {
   try {
     console.log(`📊 [FETCH-NAV] Fetching from nav-premium service for ${ticker}`);
     
-    // Call our dedicated nav-premium edge function
     const response = await fetch(`${SUPABASE_URL}/functions/v1/nav-premium`, {
       method: 'POST',
       headers: {
@@ -72,7 +91,7 @@ async function fetchNAVData(ticker: string): Promise<{ premium: string | null; d
     
     return { premium: null, discount: null, source: null };
   } catch (error) {
-    console.error(`❌ [FETCH-NAV] Error calling nav-premium:`, error);
+    console.error(`❌ [FETCH-NAV] Error:`, error);
     return { premium: null, discount: null, source: null };
   }
 }
@@ -106,23 +125,31 @@ Deno.serve(async (req) => {
     
     const currentDate = new Date().toISOString().split('T')[0];
     
-    // Pre-fetch NAV data for crypto ETFs
+    // Pre-fetch NAV and ETF Flow data for crypto ETFs
     let navData = { premium: null, discount: null, source: null };
+    let flowData = { netFlows: null, trend: null, impact: null, recommendation: null, source: null };
     
     if (isCryptoETF) {
-      console.log(`📊 [MARKET-CONTEXT] Pre-fetching NAV data for crypto ETF ${ticker}`);
-      navData = await fetchNAVData(ticker.toUpperCase());
+      console.log(`📊 [MARKET-CONTEXT] Pre-fetching NAV and Flow data for crypto ETF ${ticker}`);
+      // Fetch both in parallel
+      const [nav, flows] = await Promise.all([
+        fetchNAVData(ticker.toUpperCase()),
+        fetchETFFlowData(ticker.toUpperCase())
+      ]);
+      navData = nav;
+      flowData = flows;
       console.log(`📊 [MARKET-CONTEXT] Pre-fetched NAV data:`, navData);
+      console.log(`📊 [MARKET-CONTEXT] Pre-fetched Flow data:`, flowData);
     }
     
-    // System prompt focused on market context only
+    // System prompt for Upcoming Catalysts ONLY
     const systemPrompt = 
-      "You are a market analyst providing real-time market context.\n" +
-      "You will be provided with pre-fetched data and should analyze it.\n" +
+      "You are a market analyst providing upcoming catalyst dates.\n" +
+      "You will be provided with pre-fetched ETF flow and NAV data.\n" +
+      "Your job is ONLY to find upcoming catalyst dates via web search.\n" +
       "Output ONLY valid JSON with the exact format shown.\n" +
-      "For any missing data (null values), return null in the JSON.\n" +
-      "Do NOT use placeholder text like 'Live data not available' - use null instead.\n" +
-      "Include source URLs and timestamps when provided.";
+      "For ETF flows and NAV, use the pre-fetched values provided (don't search for these).\n" +
+      "For any missing data (null values), return null in the JSON.";
     
     // User prompt with pre-fetched data
     const userPrompt = 
@@ -133,16 +160,30 @@ Deno.serve(async (req) => {
         `NAV Data:\n` +
         `- Premium: ${navData.premium || 'null'}\n` +
         `- Discount: ${navData.discount || 'null'}\n` +
-        `- Source: ${navData.source || 'null'}\n\n` : "") +
+        `- Source: ${navData.source || 'null'}\n\n` +
+        `ETF Flow Data:\n` +
+        `- Net Flows: ${flowData.netFlows || 'null'}\n` +
+        `- Trend: ${flowData.trend || 'null'}\n` +
+        `- Impact: ${flowData.impact || 'null'}\n` +
+        `- Recommendation: ${flowData.recommendation || 'null'}\n` +
+        `- Source: ${flowData.source?.url || 'null'}\n\n` : "") +
       "INSTRUCTIONS:\n" +
-      "1. Use web_search ONLY for FOMC and CPI dates if needed\n" +
+      "1. Use web_search to find upcoming catalyst dates:\n" +
+      "   - Search federalreserve.gov for next FOMC meeting date\n" +
+      "   - Search bls.gov for next CPI release date\n" +
       "2. Calculate the next triple witching date (third Friday of Mar/Jun/Sep/Dec)\n" +
-      "3. For NAV data, use the pre-fetched values provided above\n" +
-      "4. If a value is null, return null (not text)\n\n" +
+      "3. Use the pre-fetched NAV and ETF flow values provided above (don't search for these)\n\n" +
       "Output this exact JSON structure:\n" +
       `{
         "marketData": {
-          ${isCryptoETF ? `"navAnalysis": {
+          ${isCryptoETF ? `"etfFlows": {
+            "netFlows": ${flowData.netFlows ? `"${flowData.netFlows}"` : 'null'},
+            "trend": ${flowData.trend ? `"${flowData.trend}"` : 'null'},
+            "impact": ${flowData.impact ? `"${flowData.impact}"` : 'null'},
+            "recommendation": ${flowData.recommendation ? `"${flowData.recommendation}"` : 'null'},
+            "source": ${flowData.source ? `{ "url": "${flowData.source.url}", "asOf": "${flowData.source.asOf}" }` : 'null'}
+          },
+          "navAnalysis": {
             "premium": ${navData.premium ? `"${navData.premium}"` : 'null'},
             "discount": ${navData.discount ? `"${navData.discount}"` : 'null'},
             "interpretation": "[analyze NAV divergence if data available]",
@@ -207,10 +248,10 @@ Deno.serve(async (req) => {
       tool_choice: "auto",
       include: ["web_search_call.action.sources"],
       max_output_tokens: 4000,
-      parallel_tool_calls: false  // Sequential for reliability
+      parallel_tool_calls: false
     };
     
-    console.log("🔍 [MARKET-CONTEXT] Calling OpenAI with pre-fetched data");
+    console.log("🔍 [MARKET-CONTEXT] Calling OpenAI for upcoming catalysts");
     if (debug) {
       console.log("🐛 [DEBUG] Request body:", JSON.stringify(requestBody, null, 2));
     }
@@ -265,7 +306,7 @@ Deno.serve(async (req) => {
     }
     
     // Parse the JSON response
-    let marketData: MarketData = {};
+    let marketData: any = {};
     let sources: any[] = [];
     
     try {
@@ -301,7 +342,7 @@ Deno.serve(async (req) => {
       timestamp: new Date().toISOString(),
       ...(debug ? {
         debug: {
-          preFetchedData: { nav: navData },
+          preFetchedData: { nav: navData, flow: flowData },
           parsedMarketData: marketData,
           topSources: webSearchSources.slice(0, 2)
         }

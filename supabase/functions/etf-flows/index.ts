@@ -3,6 +3,12 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 
+// Supported ETFs and their product pages
+const ETF_URLS: Record<string, string> = {
+  IBIT: "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+  ETHA: "https://www.ishares.com/us/products/337614/ishares-ethereum-trust-etf",
+};
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
@@ -35,15 +41,16 @@ interface FlowResponse {
 }
 
 /**
- * Get NAV from our nav-premium service
+ * Get NAV from our nav-premium service or use market price as proxy
  */
 async function getNAVFromService(ticker: string): Promise<{ nav: number | null; asOf: string }> {
   try {
-    // Call without debug mode to get navSnapshot
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/nav-premium`, {
+    // First try nav-premium service with debug mode to get market price
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/nav-premium?debug=nav`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'apikey': `${SUPABASE_ANON_KEY}`,
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
       },
       body: JSON.stringify({ ticker })
@@ -56,12 +63,22 @@ async function getNAVFromService(ticker: string): Promise<{ nav: number | null; 
     
     const data = await response.json();
     
-    // Check for NAV in navSnapshot field (non-debug)
+    // Check for NAV in navSnapshot field first
     if (data.success && data.navSnapshot?.nav) {
       console.log(`✅ [ETF-FLOWS] Got NAV from service: $${data.navSnapshot.nav}`);
       return {
         nav: data.navSnapshot.nav,
         asOf: data.navSnapshot.asOf || new Date().toISOString().split('T')[0]
+      };
+    }
+    
+    // If no NAV but we have market price from debug data, use that as proxy
+    // For ETFs, market price is typically within 0.1% of NAV
+    if (data.debug?.marketPrice) {
+      console.log(`📊 [ETF-FLOWS] Using market price as NAV proxy: $${data.debug.marketPrice}`);
+      return {
+        nav: data.debug.marketPrice,
+        asOf: new Date().toISOString().split('T')[0]
       };
     }
     
@@ -82,10 +99,21 @@ async function getSharesOutstanding(ticker: string): Promise<{
   asOf: string;
   rawSample: string;
 }> {
-  const productUrl = "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf";
+  const tickerUpper = ticker.toUpperCase();
+  const productUrl = ETF_URLS[tickerUpper];
+  
+  if (!productUrl) {
+    console.log(`⚠️ [ETF-FLOWS] No product URL configured for ${tickerUpper}`);
+    return { 
+      soToday: null, 
+      soPrev: null, 
+      asOf: new Date().toISOString().split('T')[0],
+      rawSample: "unsupported ticker"
+    };
+  }
   
   try {
-    console.log(`📊 [ETF-FLOWS] Fetching iShares page for Shares Outstanding`);
+    console.log(`📊 [ETF-FLOWS] Fetching iShares page for Shares Outstanding (${tickerUpper})`);
     
     const response = await fetch(productUrl, {
       headers: {
@@ -187,13 +215,17 @@ async function getSharesOutstanding(ticker: string): Promise<{
  * Flow = (SO_today - SO_prev) × NAV_today
  */
 async function computeSOFlows(ticker: string, debug: boolean = false): Promise<FlowResponse> {
+  // Hoist these so the catch block can use them safely
+  const tickerUpper = ticker.toUpperCase();
+  const sourceUrl = ETF_URLS[tickerUpper] || "";
+  
   try {
-    console.log(`📊 [ETF-FLOWS] Computing flows using SO method for ${ticker}`);
+    console.log(`📊 [ETF-FLOWS] Computing flows using SO method for ${tickerUpper}`);
     
     // Fetch NAV and Shares Outstanding in parallel
     const [navData, soData] = await Promise.all([
-      getNAVFromService(ticker),
-      getSharesOutstanding(ticker)
+      getNAVFromService(tickerUpper),
+      getSharesOutstanding(tickerUpper)
     ]);
     
     const { nav: navToday } = navData;
@@ -212,14 +244,14 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
           impact: null,
           recommendation: null,
           source: {
-            url: "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+            url: sourceUrl,
             asOf
           }
         },
         ...(debug ? {
           debug: {
             usedUrl: [
-              ETF_URLS[ticker.toUpperCase()] || '',
+              sourceUrl,
               `${SUPABASE_URL}/functions/v1/nav-premium`
             ],
             soToday,
@@ -288,7 +320,7 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
       impact,
       recommendation,
       source: {
-        url: "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+        url: sourceUrl,
         asOf
       }
     };
@@ -302,7 +334,7 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
       ...(debug ? {
         debug: {
           usedUrl: [
-            ETF_URLS[ticker.toUpperCase()] || '',
+            sourceUrl,
             `${SUPABASE_URL}/functions/v1/nav-premium`
           ],
           soToday,
@@ -326,7 +358,7 @@ async function computeSOFlows(ticker: string, debug: boolean = false): Promise<F
         impact: null,
         recommendation: null,
         source: {
-          url: "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+          url: sourceUrl,
           asOf: new Date().toISOString().split('T')[0]
         }
       },
@@ -374,11 +406,12 @@ Deno.serve(async (req) => {
       });
     }
     
-    // For now, only support IBIT
-    if (ticker.toUpperCase() !== "IBIT") {
+    // Check if ticker is supported
+    const tickerUpper = ticker.toUpperCase();
+    if (!ETF_URLS[tickerUpper]) {
       return new Response(JSON.stringify({ 
         success: false, 
-        error: "Only IBIT is currently supported" 
+        error: `Ticker ${tickerUpper} is not supported. Supported: ${Object.keys(ETF_URLS).join(", ")}` 
       }), { 
         status: 400,
         headers: { "Content-Type": "application/json", ...cors }

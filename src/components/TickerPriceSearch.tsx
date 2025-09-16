@@ -189,29 +189,35 @@ function AnalysisPanel({
 	return (
 		<div>
 			<div className='bg-[#8079e3] p-4 border-b border-[#6c68b8] flex justify-between'>
-				<h2 className='text-2xl font-bold'>{eodData.symbol}</h2>
-				<span className='text-2xl font-bold'>${nf(eodData.close)}</span>
+				<h2 className='text-2xl font-bold'>
+					{eodData.symbol === 'IBIT,ETHA' ? 'IBIT & ETHA' : eodData.symbol}
+				</h2>
+				<span className='text-2xl font-bold'>
+					{eodData.symbol === 'IBIT,ETHA' ? 'Combined Analysis' : `$${nf(eodData.close)}`}
+				</span>
 			</div>
 
 			<div className='p-4'>
-				<div className='grid grid-cols-2 gap-3'>
-					{[
-						['Open', eodData.open],
-						['High', eodData.high],
-						['Low', eodData.low],
-					].map(([lbl, val]) => (
-						<div key={lbl} className='bg-[#8079e3] p-3 rounded flex flex-col'>
-							<span className='text-xs text-white/70'>{lbl}</span>
-							<span className='font-medium'>${nf(val as number | null)}</span>
+				{eodData.symbol !== 'IBIT,ETHA' && (
+					<div className='grid grid-cols-2 gap-3'>
+						{[
+							['Open', eodData.open],
+							['High', eodData.high],
+							['Low', eodData.low],
+						].map(([lbl, val]) => (
+							<div key={lbl} className='bg-[#8079e3] p-3 rounded flex flex-col'>
+								<span className='text-xs text-white/70'>{lbl}</span>
+								<span className='font-medium'>${nf(val as number | null)}</span>
+							</div>
+						))}
+						<div className='bg-[#8079e3] p-3 rounded col-span-2'>
+							<span className='text-xs text-white/70'>Volume</span>
+							<span className='font-medium'>
+								{eodData.volume?.toLocaleString() ?? 'N/A'}
+							</span>
 						</div>
-					))}
-					<div className='bg-[#8079e3] p-3 rounded col-span-2'>
-						<span className='text-xs text-white/70'>Volume</span>
-						<span className='font-medium'>
-							{eodData.volume?.toLocaleString() ?? 'N/A'}
-						</span>
 					</div>
-				</div>
+				)}
 
 				<div className='mt-4 space-y-4'>
 					<UploadStatusTracker readiness={readiness} uploadState={uploadState} />
@@ -538,6 +544,7 @@ export function TickerPriceSearch({
         chartResults: ChartAnalysisResult[],
         _uploadState: UploadState,
         greeksMap: Map<string, OptionQuote>,
+        tickerSym: string,
     ) => {
         const { chartData, failedCharts, chartMetrics } = processChartAnalysisResults(chartResults);
         const priceContext = createPriceContext(eod, chartMetrics);
@@ -569,7 +576,7 @@ export function TickerPriceSearch({
             } as typeof portfolioData;
         }
         return {
-            ticker: eod?.symbol,
+            ticker: tickerSym === 'IBIT,ETHA' ? 'IBIT,ETHA' : eod?.symbol,
             portfolio: portfolioData,
             charts:
                 chartData.length > 0
@@ -595,12 +602,76 @@ export function TickerPriceSearch({
         }
         const j: IAResponse = out.data as IAResponse;
         if (j.success) {
-            window.dispatchEvent(new CustomEvent('analysis-ready', { detail: j.analysis }));
+            return j.analysis; // Return analysis instead of dispatching event
         } else {
             throw new Error(j.error || 'Integrated analysis error');
         }
     };
-	// Modified handleAIAnalysis - now checks readiness
+    
+    // Helper to run analysis for a single ticker
+    const runSingleAnalysis = async (singleTicker: string) => {
+        // Build payload for single ticker
+        const singleEod = tickerSymbol === 'IBIT,ETHA' 
+            ? { ...eodData, symbol: singleTicker } 
+            : eodData;
+            
+        const analysisPayload = await buildAnalysisPayload(
+            singleEod,
+            parsedPortfolio,
+            chartAnalysisResults,
+            uploadState,
+            optionGreeks,
+            singleTicker,
+        );
+        
+        console.log(`📊 Running analysis for ${singleTicker}`, analysisPayload);
+        return await submitAnalysis(analysisPayload);
+    };
+    
+    // Merge function for BOTH mode - combines IBIT and ETHA analyses
+    const mergeAnalysesForWheel = (analyses: any[]) => {
+        const safe = (x: any) => (x ?? {});
+        
+        // Combine positions from both tickers
+        const posLists = analyses.flatMap(a => safe(a.wheelStrategy)?.currentPositions ?? []);
+        const currentPositions = posLists.map((p: any) => ({
+            ...p,
+            symbol: (p.symbol ?? '').toString().toUpperCase()
+        }));
+        
+        // Sum share counts
+        const shareCount = analyses.reduce(
+            (sum, a) => sum + (safe(a.wheelStrategy).shareCount ?? 0),
+            0
+        );
+        
+        // Combine recommendations with normalization for roll analysis
+        const rollAnalysis = analyses.flatMap(a => safe(a.recommendations)?.rollAnalysis ?? [])
+            .map(roll => ({
+                ...roll,
+                // Ensure ruleA and ruleB always exist to prevent UI crashes
+                ruleA: roll?.ruleA ?? { triggered: false, threshold: null, current: null, detail: 'Not available' },
+                ruleB: roll?.ruleB ?? { triggered: false, threshold: null, current: null, detail: 'Not available' }
+            }));
+        const snapshot = analyses.flatMap(a => safe(a.recommendations)?.positionSnapshot ?? []);
+        
+        // Use first analysis as base and merge wheel/performance data
+        const base = analyses[0] ?? {};
+        return {
+            ...base,
+            wheelStrategy: {
+                shareCount,
+                currentPhase: shareCount > 0 ? 'COVERED_CALL' : 'CASH_SECURED_PUT',
+                currentPositions
+            },
+            recommendations: {
+                ...(base.recommendations ?? {}),
+                rollAnalysis,
+                positionSnapshot: snapshot
+            }
+        };
+    };
+	// Modified handleAIAnalysis - handles BOTH mode with parallel analyses
     const handleAIAnalysis = async () => {
         if (!readiness.allRequirementsMet) {
             alert('All requirements must be met before running analysis.');
@@ -609,19 +680,29 @@ export function TickerPriceSearch({
 
         window.dispatchEvent(new Event('analysis-start'));
         try {
-            const analysisPayload = await buildAnalysisPayload(
-                eodData,
-                parsedPortfolio,
-                chartAnalysisResults,
-                uploadState,
-                optionGreeks,
-            );
-            console.log('GREEKS IN PAYLOAD:', (analysisPayload as any).optionGreeks);
-            console.log('MARKET DATA IN PAYLOAD:', (analysisPayload as any).marketData);
-            logPortfolioValidation(analysisPayload, eodData?.symbol || '');
-            await submitAnalysis(analysisPayload);
+            let finalAnalysis;
+            
+            if (tickerSymbol === 'IBIT,ETHA') {
+                // BOTH mode: run parallel analyses and merge
+                console.log('🚀 Running BOTH mode - parallel analyses for IBIT and ETHA');
+                const [ibitAnalysis, ethaAnalysis] = await Promise.all([
+                    runSingleAnalysis('IBIT'),
+                    runSingleAnalysis('ETHA')
+                ]);
+                
+                // Merge the analyses for Performance/Wheel display
+                finalAnalysis = mergeAnalysesForWheel([ibitAnalysis, ethaAnalysis]);
+                console.log('✅ Merged analysis for BOTH mode:', finalAnalysis);
+            } else {
+                // Single ticker mode: run normal analysis
+                console.log(`🎯 Running single analysis for ${tickerSymbol}`);
+                finalAnalysis = await runSingleAnalysis(tickerSymbol);
+            }
+            
+            // Dispatch the final analysis (single or merged)
+            window.dispatchEvent(new CustomEvent('analysis-ready', { detail: finalAnalysis }));
         } catch (err) {
-            console.error(err);
+            console.error('Analysis failed:', err);
             alert('Analysis call failed');
         } finally {
             window.dispatchEvent(new Event('analysis-done'));
@@ -946,7 +1027,19 @@ export function TickerPriceSearch({
     useEffect(() => {
         const t = setTimeout(() => {
             const sym = tickerSymbol.trim().toUpperCase();
-            if (sym) {
+            if (sym === 'IBIT,ETHA') {
+                // For BOTH mode, set dummy data to show the panel
+                setEodData({
+                    symbol: 'IBIT,ETHA',
+                    open: null,
+                    high: null,
+                    low: null,
+                    close: null,
+                    volume: null,
+                    date: new Date().toISOString()
+                });
+                setError(null);
+            } else if (sym) {
                 fetchQuote(sym);
             } else {
                 setEodData(null);
@@ -964,13 +1057,39 @@ export function TickerPriceSearch({
 		<div className='h-full w-full'>
 			<div className='rounded-lg overflow-hidden shadow-md bg-[#9089FC] border border-[#7c77d1] h-full flex flex-col'>
 				<div className='bg-[#7c77d1] px-4 py-4 border-b border-[#6c68b8]'>
-					<h2 className='text-lg font-semibold mb-2 text-white'>Stock Lookup</h2>
-					<input
-						value={tickerSymbol}
-						onChange={(e) => onTickerChange(e.target.value.toUpperCase())}
-						placeholder='Enter ticker (e.g., NVDA)'
-						className='w-full px-3 py-2 rounded bg-white text-gray-800'
-					/>
+					<h2 className='text-lg font-semibold mb-2 text-white'>Select ETF</h2>
+					<div className='flex gap-2'>
+						<button
+							onClick={() => onTickerChange('IBIT')}
+							className={`flex-1 py-2 px-3 rounded-md font-medium transition-all ${
+								tickerSymbol === 'IBIT'
+									? 'bg-[#766DFB] text-white'
+									: 'bg-white/20 text-white/70 hover:bg-white/30'
+							}`}
+						>
+							IBIT
+						</button>
+						<button
+							onClick={() => onTickerChange('ETHA')}
+							className={`flex-1 py-2 px-3 rounded-md font-medium transition-all ${
+								tickerSymbol === 'ETHA'
+									? 'bg-[#766DFB] text-white'
+									: 'bg-white/20 text-white/70 hover:bg-white/30'
+							}`}
+						>
+							ETHA
+						</button>
+						<button
+							onClick={() => onTickerChange('IBIT,ETHA')}
+							className={`flex-1 py-2 px-3 rounded-md font-medium transition-all ${
+								tickerSymbol === 'IBIT,ETHA'
+									? 'bg-[#766DFB] text-white'
+									: 'bg-white/20 text-white/70 hover:bg-white/30'
+							}`}
+						>
+							BOTH
+						</button>
+					</div>
 					{!apiKey && <p className='text-xs text-yellow-200 mt-2'>⚠️ Configure VITE_MARKETSTACK_API_KEY</p>}
 				</div>
 

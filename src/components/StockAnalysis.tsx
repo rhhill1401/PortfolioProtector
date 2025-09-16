@@ -339,7 +339,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const { data: optionChainData } = useOptionChain(tickerSymbol);
 	
 	// Fetch market context data independently
-	const { marketData: marketContextData, loading: marketContextLoading } = useMarketContext(tickerSymbol);
+	// Skip Market Context for BOTH mode (comma-separated tickers)
+	const mcTicker = !tickerSymbol || tickerSymbol.includes(',') || tickerSymbol === 'BOTH' 
+		? null 
+		: tickerSymbol;
+	const { marketData: marketContextData, loading: marketContextLoading } = useMarketContext(mcTicker as string);
 	
 	// Fetch ETF flows separately for supported tickers
 	const { data: etfFlowsData, loading: etfFlowsLoading } = useEtfFlows(
@@ -1523,35 +1527,40 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											</CardDescription>
 										</CardHeader>
 										<CardContent className="space-y-4">
-											{analysisData.recommendations.rollAnalysis?.map((roll, idx) => (
-												<div key={idx} className="border rounded-lg p-4 bg-gray-50">
-													<div className="flex justify-between items-start mb-2">
-														<h4 className="font-semibold">{roll.position}</h4>
-														<span className={`px-2 py-1 rounded text-xs font-medium ${
-															roll.action === 'ROLL' ? 'bg-yellow-100 text-yellow-800' :
-															roll.action === 'HOLD' ? 'bg-green-100 text-green-800' :
-															'bg-gray-100 text-gray-800'
-														}`}>
-															{roll.action}
-														</span>
-													</div>
-													
-													<div className="grid grid-cols-2 gap-4 text-sm">
-														<div>
-															<p className="text-gray-600">Rule A (Price ≥ Strike × 1.08)</p>
-															<p className={`font-medium ${roll.ruleA.triggered ? 'text-red-600' : 'text-green-600'}`}>
-																{roll.ruleA.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
-															</p>
-															<p className="text-xs text-gray-500">{roll.ruleA.detail}</p>
+											{analysisData.recommendations.rollAnalysis?.map((roll, idx) => {
+												// Normalize roll data to prevent crashes from missing ruleA/ruleB
+												const safeRuleA = roll?.ruleA ?? { triggered: false, threshold: null, current: null, detail: 'Not available' };
+												const safeRuleB = roll?.ruleB ?? { triggered: false, threshold: null, current: null, detail: 'Not available' };
+												
+												return (
+													<div key={idx} className="border rounded-lg p-4 bg-gray-50">
+														<div className="flex justify-between items-start mb-2">
+															<h4 className="font-semibold">{roll.position}</h4>
+															<span className={`px-2 py-1 rounded text-xs font-medium ${
+																roll.action === 'ROLL' ? 'bg-yellow-100 text-yellow-800' :
+																roll.action === 'HOLD' ? 'bg-green-100 text-green-800' :
+																'bg-gray-100 text-gray-800'
+															}`}>
+																{roll.action}
+															</span>
 														</div>
-														<div>
-															<p className="text-gray-600">Rule B (Delta ≥ 0.80)</p>
-															<p className={`font-medium ${roll.ruleB.triggered ? 'text-red-600' : 'text-green-600'}`}>
-																{roll.ruleB.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
-															</p>
-															<p className="text-xs text-gray-500">{roll.ruleB.detail}</p>
+														
+														<div className="grid grid-cols-2 gap-4 text-sm">
+															<div>
+																<p className="text-gray-600">Rule A (Price ≥ Strike × 1.08)</p>
+																<p className={`font-medium ${safeRuleA.triggered ? 'text-red-600' : 'text-green-600'}`}>
+																	{safeRuleA.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
+																</p>
+																<p className="text-xs text-gray-500">{safeRuleA.detail || 'Not available'}</p>
+															</div>
+															<div>
+																<p className="text-gray-600">Rule B (Delta ≥ 0.80)</p>
+																<p className={`font-medium ${safeRuleB.triggered ? 'text-red-600' : 'text-green-600'}`}>
+																	{safeRuleB.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
+																</p>
+																<p className="text-xs text-gray-500">{safeRuleB.detail || 'Not available'}</p>
+															</div>
 														</div>
-													</div>
 													
 													{roll.conditionalTrigger && (
 														<div className="mt-3 p-2 bg-yellow-50 rounded">
@@ -1563,7 +1572,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 														<p className="mt-2 text-sm text-gray-700">{roll.recommendation}</p>
 													)}
 												</div>
-											))}
+											);
+											})}
 										</CardContent>
 									</Card>
 
@@ -1743,8 +1753,18 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 
 						{/* Market Context Tab Content */}
 						<TabsContent value='market-context' className='space-y-4'>
+							{/* Show message for BOTH mode */}
+							{tickerSymbol?.includes(',') && (
+								<Card>
+									<CardContent className="py-8 text-center">
+										<p className="text-gray-500">Market Context is not available for combined analysis.</p>
+										<p className="text-sm text-gray-400 mt-2">Please select IBIT or ETHA individually for market context.</p>
+									</CardContent>
+								</Card>
+							)}
+							
 							{/* Loading state */}
-							{marketContextLoading && (
+							{!tickerSymbol?.includes(',') && marketContextLoading && (
 								<Card>
 									<CardContent className="py-8 text-center">
 										<p className="text-gray-500">Loading market context...</p>
@@ -1753,7 +1773,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							)}
 							
 							{/* Market data loaded */}
-							{!marketContextLoading && marketContextData && (
+							{!tickerSymbol?.includes(',') && !marketContextLoading && marketContextData && (
 								<>
 							{/* Overall Market Sentiment */}
 							{marketContextData?.overallSentiment && (
@@ -1787,26 +1807,26 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											<div className="grid grid-cols-2 gap-4">
 												<div>
 													<p className="text-xs text-gray-500">Net Flows</p>
-													<p className="font-medium">{etfFlowsData?.netFlows || 'Live data not available'}</p>
+													<p className="font-medium">{etfFlowsData?.netFlows || marketContextData?.etfFlows?.netFlows || 'Live data not available'}</p>
 												</div>
 												<div>
 													<p className="text-xs text-gray-500">Trend</p>
-													<p className="font-medium">{etfFlowsData?.trend || 'Live data not available'}</p>
+													<p className="font-medium">{etfFlowsData?.trend || marketContextData?.etfFlows?.trend || 'Live data not available'}</p>
 												</div>
 												<div className="col-span-2">
 													<p className="text-xs text-gray-500">Impact</p>
-													<p className="text-sm">{etfFlowsData?.impact || 'Live data not available'}</p>
+													<p className="text-sm">{etfFlowsData?.impact || marketContextData?.etfFlows?.impact || 'Live data not available'}</p>
 												</div>
 												<div className="col-span-2">
 													<p className="text-xs text-gray-500">Recommendation</p>
-													<p className="text-sm font-medium text-blue-600">{etfFlowsData?.recommendation || 'Hold or size conservatively until clear flow trends emerge'}</p>
+													<p className="text-sm font-medium text-blue-600">{etfFlowsData?.recommendation || marketContextData?.etfFlows?.recommendation || 'Hold or size conservatively until clear flow trends emerge'}</p>
 												</div>
 												{/* Always show Source and As Of */}
-												{etfFlowsData?.source && (
+												{(etfFlowsData?.source || marketContextData?.etfFlows?.source) && (
 													<div className="col-span-2 mt-2 pt-2 border-t">
 														<p className="text-xs text-gray-400">
-															As of {etfFlowsData.source.asOf} • 
-															<a href={etfFlowsData.source.url} 
+															As of {etfFlowsData?.source?.asOf || marketContextData?.etfFlows?.source?.asOf} • 
+															<a href={etfFlowsData?.source?.url || marketContextData?.etfFlows?.source?.url} 
 															   target="_blank" 
 															   rel="noopener noreferrer"
 															   className="text-blue-500 hover:underline">

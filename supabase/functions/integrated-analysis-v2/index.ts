@@ -166,6 +166,15 @@ Deno.serve(async (req) => {
           marketData = {} } = body ?? {};
 
   if (!ticker) return json({ success: false, error: "ticker required" }, 400);
+  
+  // Guard against comma-separated tickers (BOTH mode is handled client-side)
+  if (ticker.includes(',')) {
+    return json({ 
+      success: false, 
+      error: "Send ONE ticker per request (BOTH mode is handled client-side)" 
+    }, 400);
+  }
+  
   if (!OPENAI_API_KEY)
     return json({ success: false, error: "Missing OpenAI key" }, 500);
   

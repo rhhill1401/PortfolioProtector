@@ -27,6 +27,7 @@ PortfolioProtector is a real-time market analysis platform that combines AI-powe
 ┌────────────────────────┴────────────────────────────────────┐
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
 │  │OpenAI GPT-5  │  │Polygon.io    │  │Marketstack   │      │
+│  │(Reasoning)   │  │              │  │              │      │
 │  └──────────────┘  └──────────────┘  └──────────────┘      │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -42,7 +43,7 @@ PortfolioProtector is a real-time market analysis platform that combines AI-powe
 | **Components** | shadcn/ui | Reusable UI components |
 | **Backend** | Supabase Edge Functions | Serverless API endpoints |
 | **Runtime** | Deno | Edge function runtime |
-| **AI** | OpenAI GPT-4 | Analysis & vision processing |
+| **AI** | OpenAI GPT-5, GPT-4 Vision | Analysis & reasoning |
 | **Market Data** | Marketstack, Polygon.io | Real-time quotes & options |
 | **Package Manager** | npm (NOT yarn) | Dependency management |
 
@@ -188,11 +189,11 @@ try {
 - **CORS Issue**: All calls proxied through Supabase
 - **Key Challenge**: Incomplete Greeks data sometimes
 
-### OpenAI GPT-4
-- **Models Used**: 
-  - `gpt-4-turbo-preview`: Analysis
-  - `gpt-4-vision-preview`: Image processing
-  - `gpt-4o`: Reasoning model (v2)
+### OpenAI Models
+- **Models Used**:
+  - `gpt-5-reasoning`: Advanced reasoning and analysis (integrated-analysis-v2)
+  - `gpt-4-vision-preview`: Image processing for charts and portfolios
+  - `gpt-4-turbo`: Fallback for standard analysis
 - **Token Limits**: ~8000 tokens per request
 - **Response Format**: Structured JSON
 
@@ -222,8 +223,8 @@ try {
 4. User clicks "Get AI Analysis"
    → Fetch Greeks for positions
    → Build analysis payload
-   → Call integrated-analysis-v2
-   → Process AI response
+   → Call integrated-analysis-v2 (GPT-5)
+   → Process structured JSON response
    → Display in tabs
 ```
 
@@ -525,4 +526,4 @@ supabase functions serve integrated-analysis-v2 --no-verify-jwt
 
 ---
 
-*This architecture document is a living document and should be updated as the system evolves. Last updated: September 2025*
+*This architecture document is a living document and should be updated as the system evolves. Last updated: January 2025*

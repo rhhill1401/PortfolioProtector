@@ -1049,6 +1049,20 @@ export function TickerPriceSearch({
         return () => clearTimeout(t);
     }, [tickerSymbol, fetchQuote]);
 
+    // Clear all cached analysis data when ticker changes
+    useEffect(() => {
+        // Clear all cached data to prevent stale data in subsequent analyses
+        setProcessedChartData([]);
+        setChartAnalysisResults([]);
+        setParsedPortfolio(null);
+        setOptionGreeks(new Map());
+        setUploadState(initialUploadState);
+        setReadiness(initialReadiness);
+        setIsAnalyzing(false);
+
+        console.log(`🧹 Cleared all cached analysis data for ticker change to: ${tickerSymbol}`);
+    }, [tickerSymbol]);
+
 	const nf = (v: number | null) => (v == null ? 'N/A' : v.toFixed(2));
 	const df = (d?: string | null) =>
 		d ? new Date(d).toLocaleDateString() : 'N/A';

@@ -1849,29 +1849,60 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<CardDescription>Trading relative to net asset value</CardDescription>
 									</CardHeader>
 									<CardContent>
-										<div className="grid grid-cols-2 gap-4">
-											<div>
-												<p className="text-xs text-gray-500">Premium</p>
-												<p className="font-medium">{marketContextData.navAnalysis.premium || 'Live data not available'}</p>
+										<div className="space-y-4">
+											{/* Single Signed NAV Metric */}
+											<div className="flex items-center justify-between">
+												<div>
+													<p className="text-xs text-gray-500 mb-1">Current Status</p>
+													{(() => {
+														const premium = marketContextData.navAnalysis.premium;
+														const discount = marketContextData.navAnalysis.discount;
+
+														if (!premium && !discount) {
+															return <p className="text-lg font-medium text-gray-500">Live data not available</p>;
+														}
+
+														// Parse the percentage value
+														const value = premium || discount;
+														const numValue = parseFloat(value?.replace('%', '') || '0');
+														const isDiscount = !!discount;
+
+														// Determine color based on value
+														const colorClass = Math.abs(numValue) < 0.1 ? 'text-gray-600' :
+																		   isDiscount ? 'text-green-600' : 'text-amber-600';
+
+														// Determine icon
+														const icon = Math.abs(numValue) < 0.1 ? '→' :
+																	isDiscount ? '↓' : '↑';
+
+														return (
+															<div className="flex items-center gap-2">
+																<span className={`text-2xl font-bold ${colorClass}`}>
+																	{isDiscount ? '-' : '+'}{value}
+																</span>
+																<span className={`text-2xl ${colorClass}`}>{icon}</span>
+															</div>
+														);
+													})()}
+												</div>
 											</div>
+
 											<div>
-												<p className="text-xs text-gray-500">Discount</p>
-												<p className="font-medium">{marketContextData.navAnalysis.discount || 'Live data not available'}</p>
-											</div>
-											<div className="col-span-2">
 												<p className="text-xs text-gray-500">Interpretation</p>
 												<p className="text-sm">{marketContextData.navAnalysis.interpretation || 'Live data not available'}</p>
 											</div>
-											<div className="col-span-2">
+
+											<div>
 												<p className="text-xs text-gray-500">Trading Opportunity</p>
 												<p className="text-sm font-medium text-blue-600">{marketContextData.navAnalysis.tradingOpportunity || 'Live data not available'}</p>
 											</div>
+
 											{marketContextData.navAnalysis.source?.url && (
-												<div className="col-span-2 mt-2 pt-2 border-t">
+												<div className="mt-2 pt-2 border-t">
 													<p className="text-xs text-gray-400">
-														As of {marketContextData.navAnalysis.source.asOf} • 
-														<a href={marketContextData.navAnalysis.source.url} 
-														   target="_blank" 
+														As of {marketContextData.navAnalysis.source.asOf} •
+														<a href={marketContextData.navAnalysis.source.url}
+														   target="_blank"
 														   rel="noopener noreferrer"
 														   className="text-blue-500 hover:underline">
 															Source

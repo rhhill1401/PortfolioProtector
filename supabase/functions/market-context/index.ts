@@ -56,14 +56,14 @@ async function fetchETFFlowData(ticker: string): Promise<{
 }
 
 // Helper function to fetch NAV data from our dedicated nav-premium service
-async function fetchNAVData(ticker: string): Promise<{ 
-  premium: string | null; 
-  discount: string | null; 
-  source: string | null 
+async function fetchNAVData(ticker: string): Promise<{
+  premium: string | null;
+  discount: string | null;
+  source: string | null
 }> {
   try {
     console.log(`📊 [FETCH-NAV] Fetching from nav-premium service for ${ticker}`);
-    
+
     const response = await fetch(`${SUPABASE_URL}/functions/v1/nav-premium`, {
       method: 'POST',
       headers: {
@@ -72,14 +72,14 @@ async function fetchNAVData(ticker: string): Promise<{
       },
       body: JSON.stringify({ ticker })
     });
-    
+
     if (!response.ok) {
       console.log(`⚠️ [FETCH-NAV] Failed to fetch from nav-premium: ${response.status}`);
       return { premium: null, discount: null, source: null };
     }
-    
+
     const data = await response.json();
-    
+
     if (data.success && data.navAnalysis) {
       console.log(`✅ [FETCH-NAV] Got NAV data from nav-premium service:`, data.navAnalysis);
       return {
@@ -88,11 +88,142 @@ async function fetchNAVData(ticker: string): Promise<{
         source: data.navAnalysis.source?.url || null
       };
     }
-    
+
     return { premium: null, discount: null, source: null };
   } catch (error) {
     console.error(`❌ [FETCH-NAV] Error:`, error);
     return { premium: null, discount: null, source: null };
+  }
+}
+
+// Helper function to fetch NAV via web search
+async function fetchNavViaWebSearch(ticker: string): Promise<{
+  premium: string | null;
+  discount: string | null;
+  source: string | null;
+  asOf: string | null;
+}> {
+  try {
+    const tickerUpper = ticker.toUpperCase();
+    const productHint =
+      tickerUpper === "IBIT"
+        ? "iShares Bitcoin Trust ETF"
+        : tickerUpper === "ETHA"
+          ? "iShares Ethereum Trust ETF"
+          : tickerUpper;
+
+    const system = [
+      "You are a strict financial data extractor.",
+      "Return ONLY JSON with this exact shape:",
+      '{"navAnalysis":{"premium":"+0.07%","discount":null,"source":"https://...","asOf":"YYYY-MM-DD"}}',
+      "Rules:",
+      "- Use only ishares.com, blackrock.com, or ycharts.com.",
+      "- Extract the CURRENT premium/discount to NAV for the specific fund.",
+      "- If it is a premium, fill premium and set discount=null; if a discount, fill discount and set premium=null.",
+      "- Use ISO date (YYYY-MM-DD) for asOf.",
+      "- If you cannot confirm, return premium=null, discount=null, source=null, asOf=null.",
+      "- No commentary. No placeholders. JSON only.",
+    ].join("\n");
+
+    const user = [
+      `Fund: ${productHint} (${tickerUpper})`,
+      "Task: find CURRENT premium/discount vs NAV and the as-of date.",
+      "Sources whitelist: ishares.com, blackrock.com, ycharts.com.",
+      "Return JSON only with premium/discount (+/- and %), source URL, and asOf.",
+    ].join("\n");
+
+    const body = {
+      model: "gpt-5",
+      instructions: system,
+      input: user,
+      tools: [
+        {
+          type: "web_search",
+          filters: {
+            allowed_domains: ["ishares.com", "blackrock.com", "ycharts.com"],
+          },
+        },
+      ],
+      tool_choice: "auto",
+      include: ["web_search_call.action.sources"],
+      max_output_tokens: 1200,
+      parallel_tool_calls: false,
+      reasoning: { effort: "low" },
+    };
+
+    const res = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const raw = await res.json();
+    if (!res.ok) {
+      console.error("❌ [NAV-WS] OpenAI error:", raw);
+      return { premium: null, discount: null, source: null, asOf: null };
+    }
+
+    // Extract text
+    let text = "";
+    if (typeof raw.output_text === "string") {
+      text = raw.output_text;
+    } else if (Array.isArray(raw.output)) {
+      text = raw.output
+        .flatMap((it: any) =>
+          Array.isArray(it?.content)
+            ? it.content.map((c: any) => c?.text || "").filter(Boolean)
+            : []
+        )
+        .join("");
+    }
+
+    // Parse JSON
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // attempt to trim junk and parse again
+      const first = text.indexOf("{");
+      const last = text.lastIndexOf("}");
+      if (first !== -1 && last !== -1 && last > first) {
+        parsed = JSON.parse(text.slice(first, last + 1));
+      }
+    }
+
+    const obj = parsed?.navAnalysis ?? {};
+    const premium = typeof obj.premium === "string" ? obj.premium : null;
+    const discount = typeof obj.discount === "string" ? obj.discount : null;
+    const source = typeof obj.source === "string" ? obj.source : null;
+    const asOf = typeof obj.asOf === "string" ? obj.asOf : null;
+
+    // Minimal validation: must end with '%' when present
+    const pctLike = (s: string | null) =>
+      !!s && /-?\+?\d+(\.\d+)?%$/.test(s.trim());
+
+    const out = {
+      premium: pctLike(premium) ? premium : null,
+      discount: pctLike(discount) ? discount : null,
+      source,
+      asOf,
+    };
+
+    // Normalize mutual exclusivity (premium XOR discount)
+    if (out.premium && out.discount) {
+      // prefer whichever has absolute larger magnitude
+      const p = Math.abs(parseFloat(out.premium));
+      const d = Math.abs(parseFloat(out.discount));
+      if (p >= d) out.discount = null;
+      else out.premium = null;
+    }
+
+    console.log("✅ [NAV-WS] Result:", out);
+    return out;
+  } catch (err) {
+    console.error("💥 [NAV-WS] Exception:", err);
+    return { premium: null, discount: null, source: null, asOf: null };
   }
 }
 
@@ -332,9 +463,55 @@ Deno.serve(async (req) => {
     const webSearchSources = raw.output
       ?.filter((item: any) => item.type === "web_search_call")
       ?.flatMap((item: any) => item.action?.sources || []) || [];
-    
+
+    // Override navAnalysis ONLY for crypto ETFs with web search data
+    if (isCryptoETF) {
+      const navWS = await fetchNavViaWebSearch(ticker.toUpperCase());
+      const haveWS = !!(navWS.premium || navWS.discount);
+
+      if (haveWS) {
+        // Helper to build interpretation/opportunity without changing the card's shape
+        const toNumber = (s: string | null): number | null => {
+          if (!s) return null;
+          const m = s.match(/-?\+?\d+(\.\d+)?/);
+          return m ? parseFloat(m[0]) : null;
+        };
+        const pct = toNumber(navWS.premium ?? navWS.discount ?? null);
+        let interpretation: string | null = null;
+        let tradingOpportunity: string | null = null;
+
+        if (pct != null) {
+          const a = Math.abs(pct);
+          if (a < 0.30) {
+            interpretation = "Trading near NAV";
+            tradingOpportunity = "Standard wheel execution conditions";
+          } else if (pct > 0) {
+            interpretation = "Trading at a premium to NAV";
+            tradingOpportunity = "Favor covered-call sales into strength";
+          } else {
+            interpretation = "Trading at a discount to NAV";
+            tradingOpportunity = "Potential mean-reversion entry; size conservatively";
+          }
+        }
+
+        marketData.navAnalysis = {
+          premium: navWS.premium,
+          discount: navWS.discount,
+          interpretation,
+          tradingOpportunity,
+          source: {
+            url: navWS.source || "",
+            asOf: navWS.asOf || new Date().toISOString().split("T")[0],
+          },
+        };
+      } else {
+        // Leave whatever you already had (from previous code) — do not alter other cards
+        // If you previously set nulls, keep them null; no placeholders.
+      }
+    }
+
     console.log("✅ [MARKET-CONTEXT] Successfully processed market data");
-    
+
     const response = {
       success: true,
       marketData,

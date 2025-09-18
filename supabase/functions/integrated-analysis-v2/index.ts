@@ -12,8 +12,32 @@
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+import {
+  analyzeWheelStrategy,
+  type CalculatedOption,
+  type ChartMetric,
+  type OptionQuote,
+  type PortfolioData,
+  type PriceContext,
+  type WheelStrategyResult,
+} from "./strategies.ts";
+
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5";
+
+const OPENAI_TIMEOUT_MS = 50_000; // 50s safety window (Supabase limit is 60s)
+
+async function runWithTimeout<T>(timeoutMs: number, task: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await task(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export { runWithTimeout };
 
 async function callOpenAI(OPENAI_API_KEY: string, OPENAI_MODEL: string, prompt: string): Promise<Record<string, unknown>> {
   const model = OPENAI_MODEL;
@@ -25,18 +49,48 @@ async function callOpenAI(OPENAI_API_KEY: string, OPENAI_MODEL: string, prompt: 
     "For the recommendations section:\n- Fill in the plainEnglishSummary with clear, actionable language\n- Provide specific recommendations in rollAnalysis for each position\n- Use everyday language, no jargon unless explained\n- Focus on what to DO, not theory\n" +
     "For market sentiment analysis:\n- Analyze ETF flows when dealing with crypto assets (IBIT, ETH ETFs)\n- Check NAV premium/discount for ETF products\n- Evaluate implied volatility levels and options skew\n- Track large options flow and open interest patterns\n- Identify upcoming catalysts that affect trading decisions";
 
-  const res = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      input: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt }
-      ],
-      max_output_tokens: 8000
-    })
+  const started = Date.now();
+  const promptChars = prompt.length;
+  const promptLines = prompt.split("\n").length;
+
+  console.log('🚀 [AI CALL] Starting OpenAI request', {
+    model,
+    promptChars,
+    promptLines,
+    timeoutMs: OPENAI_TIMEOUT_MS
   });
+
+  let res: Response;
+  try {
+    res = await runWithTimeout(OPENAI_TIMEOUT_MS, (signal) =>
+      fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          input: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
+          ],
+          max_output_tokens: 8000
+        }),
+        signal
+      })
+    );
+  } catch (err) {
+    const duration = Date.now() - started;
+    if (err instanceof DOMException && err.name === "AbortError") {
+      console.error('⏱️ [AI CALL] Timed out', { durationMs: duration, promptChars, promptLines });
+      const timeoutError = new Error("AI_TIMEOUT");
+      (timeoutError as Error & { cause?: unknown }).cause = err;
+      throw timeoutError;
+    }
+    console.error('💥 [AI CALL] Fetch failed before completion', { durationMs: duration, error: err?.message ?? String(err) });
+    throw err;
+  }
+
+  const duration = Date.now() - started;
+  console.log('✅ [AI CALL] Completed', { durationMs: duration, status: res.status, promptChars });
 
   const raw = await res.json();
   if (!res.ok) throw new Error(raw?.error?.message ?? `OpenAI error ${res.status}`);
@@ -82,64 +136,6 @@ Deno.serve(async (req) => {
   }
 
   /* ---------- Validate body ---------- */
-  interface PortfolioData {
-    positions: Array<{
-      symbol: string;
-      quantity: number;
-      purchasePrice?: number;
-      currentValue?: number;
-      percentOfPortfolio?: number;
-    }>;
-    totalValue?: number;
-    rawFiles?: string[];
-    metadata?: Record<string, unknown>;
-  }
-
-  interface KeyLevel {
-    price: number;
-    type: "Support" | "Resistance";
-    strength: string;
-  }
-
-  interface ChartMetric {
-    timeframe: string;
-    keyLevels?: KeyLevel[];
-    trend: string;
-    rsi: string;
-    macd: string;
-  }
-
-  interface PriceContext {
-    current: number | null;
-    open: number | null;
-    high: number | null;
-    low: number | null;
-    close: number | null;
-    volume: number | null;
-    date: string | null;
-    timeframe: string;
-    rangeDays?: number;
-  }
-
-  interface OptionQuote {
-    ticker: string;
-    strike: number;
-    expiry: string;
-    type: string;
-    dte: number;
-    mid: number;
-    bid: number | null;
-    ask: number | null;
-    delta: number | null;
-    gamma: number | null;
-    theta: number | null;
-    vega: number | null;
-    iv: number | null;
-    openInterest: number | null;
-    dayVolume: number | null;
-    lastUpdated: number;
-    isStale?: boolean;
-  }
 
   let body:
     | {
@@ -162,8 +158,10 @@ Deno.serve(async (req) => {
           portfolio,
           chartMetrics = [],
           priceContext,
-          optionGreeks = {},
+          optionGreeks: optionGreeksRaw = {},
           marketData = {} } = body ?? {};
+
+  const optionGreeks: Record<string, OptionQuote> = optionGreeksRaw as Record<string, OptionQuote>;
 
   if (!ticker) return json({ success: false, error: "ticker required" }, 400);
   
@@ -207,226 +205,56 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Extract key levels with proper formatting
-  const keyLevels = (chartMetrics as ChartMetric[])
-    .flatMap((c) => c.keyLevels ?? []);
-  
-  const supports = keyLevels
-    .filter(l => l.type === "Support")
-    .sort((a, b) => b.price - a.price); // Highest to lowest
-  
-  const resistances = keyLevels
-    .filter(l => l.type === "Resistance")
-    .sort((a, b) => a.price - b.price); // Lowest to highest
+  const wheelAnalysis: WheelStrategyResult = analyzeWheelStrategy({
+    ticker,
+    portfolio,
+    chartMetrics: chartMetrics as ChartMetric[],
+    priceContext,
+    optionGreeks,
+  });
 
-  const currentPrice = priceContext?.current || 0;
-  const highPrice = priceContext?.high || 0;
-  const lowPrice = priceContext?.low || 0;
-  
-  // 🎯 WHEEL STRATEGY ANALYSIS - Detect portfolio position and wheel phase
-  const hasPosition = portfolio?.positions?.some(p => p.symbol === ticker) || false;
-  const currentShares = portfolio?.positions?.find(p => p.symbol === ticker)?.quantity || 0;
-  const rawPurchase = portfolio?.positions?.find(p => p.symbol === ticker)?.purchasePrice;
-  const costBasis = typeof rawPurchase === 'number' && Number.isFinite(rawPurchase) 
-    ? rawPurchase 
-    : currentPrice; // Use current price as fallback when purchase price is "Unknown" or invalid
-  
-  // 💰 EXTRACT CASH BALANCE
-  // Check if portfolio has cashBalance directly (from portfolio-vision)
-  const cashBalance = portfolio?.cashBalance || 0; // No default - use actual value from portfolio
-  const stockValue = currentShares * currentPrice;
-  const totalValue = portfolio?.totalValue || (cashBalance + stockValue);
-  console.log('💰 [CASH BALANCE]:', { 
+  const {
+    currentPrice,
+    hasPosition,
+    currentShares,
+    costBasis,
+    cashBalance,
+    stockValue,
+    totalValue,
+    optionPositions,
+    currentOptionPositions,
+    supports,
+    resistances,
+    totalPremiumCollected,
+    stockUnreal,
+    totalMarkPnl,
+    totalWheelPnl,
+    wheelPhase,
+    optimalStrike,
+    callStrikeZone,
+    putStrikeZone,
+    volatilityEstimate,
+    ivRank,
+    rsi,
+    macd,
+    trend,
+  } = wheelAnalysis;
+
+  console.log('💰 [CASH BALANCE]:', {
     cashFromPortfolio: portfolio?.cashBalance,
     cashBalance,
-    stockValue, 
-    totalValue 
-  });
-  
-  // 📊 EXTRACT ACTUAL OPTION POSITIONS from portfolio metadata
-  
-  /** ───────── OPTION METRICS PRE-COMPUTE ───────── */
-  interface CalculatedOption extends Record<string, unknown> {
-    profitLoss: number;
-    cycleReturn: number;
-    intrinsic: number;
-    extrinsic: number;
-    optionMTM: number;
-    wheelNet: number;
-  }
-  
-  function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number, greeks?: OptionQuote): CalculatedOption {
-    // Handle premium - could be per-share or total depending on source
-    let prem = Number(opt.premiumCollected) || 0;
-    const cnt  = Math.abs(Number(opt.contracts) || 1);
-    
-    // If premium seems too small (< $100), it's likely per-share and needs conversion
-    if (prem > 0 && prem < 100) {
-      prem = prem * 100 * cnt; // Convert per-share to total premium
-      console.log(`📊 Converted premium from per-share $${(prem / (100 * cnt)).toFixed(2)} to total $${prem.toFixed(2)}`);
-    }
-    
-    const cur  = Number(opt.currentValue) || 0;
-    const strike = Number(opt.strike) || 0;
-    const isCall = opt.optionType === 'CALL';
-    
-    // For wheel strategy, we keep the premium collected
-    const pl = prem;  // Premium collected is our profit
-    
-    // Assignment profit if shares get called away
-    const assignmentProfit = isCall 
-      ? (strike - costBasis) * 100 * cnt
-      : 0;  // For puts, we'd be buying shares
-    
-    // Total wheel profit = premium + profit from shares if assigned
-    const totalWheelProfit = prem + assignmentProfit;
-    
-    // MTM for display (what it would cost to buy back)
-    const mtm = prem - cur;
-    
-    // NEW FIELDS as specified:
-    const markToMarketPnl = (prem - cur) * (Number(opt.contracts) < 0 ? 1 : -1); // buy-to-close TODAY
-    const wheelFinalPnl = prem + assignmentProfit;                               // wheel outcome AT expiry
-    
-    // Percent return on capital at risk
-    const capital = costBasis * 100 * cnt;  // Capital tied up in shares
-    const ret = capital > 0 ? (totalWheelProfit / capital) * 100 : 0;
-    
-    const intrinsic = isCall 
-      ? Math.max(0, spotPrice - strike) * 100 * cnt
-      : Math.max(0, strike - spotPrice) * 100 * cnt;
-    const extrinsic = Math.max(0, cur - intrinsic);
-    
-    // Add Greeks if available
-    const delta = greeks?.delta as number | null || null;
-    const gamma = greeks?.gamma as number | null || null;
-    const theta = greeks?.theta as number | null || null;
-    const vega = greeks?.vega as number | null || null;
-    const iv = greeks?.iv as number | null || null;
-    
-    return { 
-      ...opt, 
-      profitLoss: Math.round(pl),
-      cycleReturn: Number(ret.toFixed(2)),
-      intrinsic: Math.round(intrinsic),
-      extrinsic: Math.round(extrinsic),
-      optionMTM: Math.round(mtm),
-      wheelNet: Math.round(totalWheelProfit),
-      assignmentProfit: Math.round(assignmentProfit),
-      markPnl: Math.round(markToMarketPnl),    // NEW ➜ "P/L if I buy back now"
-      wheelPnl: Math.round(wheelFinalPnl),      // NEW ➜ "P/L if it expires/assigns"
-      delta,
-      gamma,
-      theta,
-      vega,
-      iv
-    };
-  }
-  
-  // Debug: Log optionGreeks to see what we received
-  console.log('🔍 [DEBUG] optionGreeks received:', {
-    hasOptionGreeks: !!optionGreeks,
-    optionGreeksType: typeof optionGreeks,
-    optionGreeksKeys: Object.keys(optionGreeks || {}),
-    firstKey: Object.keys(optionGreeks || {})[0],
-    firstValue: optionGreeks?.[Object.keys(optionGreeks || {})[0]]
+    stockValue,
+    totalValue,
   });
 
-  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => {
-    // Get Greeks for this position if available
-    const positionKey = `${(opt.symbol as string)?.toUpperCase()}-${opt.strike}-${opt.expiry}-${((opt.optionType as string) || 'CALL').toUpperCase()}`;
-    const positionGreeks = optionGreeks && optionGreeks[positionKey] as OptionQuote | undefined;
-    
-    // Debug: Log each position lookup
-    console.log(`🔍 [DEBUG] Looking up Greeks for position:`, {
-      position: `${opt.symbol} ${opt.strike} ${opt.expiry} ${opt.optionType}`,
-      positionKey,
-      greeksFound: !!positionGreeks,
-      delta: positionGreeks?.delta
-    });
-    
-    return calcOptionMetrics(opt, currentPrice, costBasis, positionGreeks);
-  });
-  const currentOptionPositions =
-    optionPositions.filter((opt: Record<string, unknown>) => (opt.symbol as string)?.startsWith(ticker));
-  
-  const totalPremiumCollected = currentOptionPositions.reduce((total: number, opt: Record<string, unknown>) => {
-    let prem = Number(opt.premiumCollected) || 0;
-    const cnt = Math.abs(Number(opt.contracts) || 1);
-    
-    // Apply same conversion logic as in calcOptionMetrics
-    if (prem > 0 && prem < 100) {
-      prem = prem * 100 * cnt; // Convert per-share to total premium
-    }
-    
-    return total + prem;
-  }, 0);
-  
-  const totalContracts = currentOptionPositions.reduce((total: number, opt: Record<string, unknown>) => {
-    return total + Math.abs(Number(opt.contracts) || 0);
-  }, 0);
-  
-  // Portfolio-level math (NEW)
-  const stockUnreal = (currentPrice - costBasis) * currentShares;
-  const totalMarkPnl = currentOptionPositions.reduce((t: number, o: Record<string, unknown>) => t + (o.markPnl as number || 0), 0);
-  const totalWheelPnl = currentOptionPositions.reduce((t: number, o: Record<string, unknown>) => t + (o.wheelPnl as number || 0), 0);
-  
-  console.log('🔍 [WHEEL ANALYSIS] Portfolio analysis:', {
-    ticker,
-    hasPosition,
-    totalPositions: currentOptionPositions.length,
-    totalContracts: totalContracts,
-    totalPremiumCollected: totalPremiumCollected.toFixed(2),
-    currentShares,
-    optionPositionsFound: currentOptionPositions.length,
-    allOptionPositions: optionPositions.length
-  });
-  
-  // Log all option positions for debugging
-  console.log('📊 [ALL OPTION POSITIONS] Raw data:', 
-    optionPositions.map((opt: Record<string, unknown>) => ({
-      symbol: opt.symbol,
-      strike: opt.strike,
-      contracts: opt.contracts,
-      premium: opt.premiumCollected,
-      profitLoss: opt.profitLoss
-    }))
-  );
+  console.log('📊 [ALL OPTION POSITIONS] Raw data:', optionPositions.map((opt) => ({
+    symbol: opt.symbol,
+    strike: opt.strike,
+    contracts: opt.contracts,
+    premium: opt.premiumCollected,
+    profitLoss: opt.profitLoss,
+  })));
 
-  // 🚨 CRITICAL DEBUG: Log exact portfolio structure received
-  console.log('🚨 [DEBUG] EXACT PORTFOLIO STRUCTURE RECEIVED:', JSON.stringify({
-    portfolio: portfolio,
-    hasPortfolioKey: !!portfolio,
-    portfolioType: typeof portfolio,
-    portfolioKeys: portfolio ? Object.keys(portfolio) : 'no portfolio',
-    hasPositions: !!(portfolio?.positions),
-    positionsLength: portfolio?.positions?.length || 0,
-    hasMetadata: !!(portfolio?.metadata),
-    metadataKeys: portfolio?.metadata ? Object.keys(portfolio.metadata) : 'no metadata',
-    optionPositionsFromMetadata: portfolio?.metadata?.optionPositions?.length || 0,
-    firstOptionPosition: portfolio?.metadata?.optionPositions?.[0] || 'none'
-  }, null, 2));
-  
-  if (currentOptionPositions.length > 0) {
-    console.log('📊 [CURRENT OPTIONS] Found existing option positions:', currentOptionPositions);
-  }
-  
-  // Calculate wheel-relevant strike zones
-  const callStrikeZone = resistances.filter(r => r.price > currentPrice * 1.02); // 2%+ OTM calls
-  const putStrikeZone = supports.filter(s => s.price < currentPrice * 0.98); // 2%+ OTM puts
-  
-  // Estimate implied volatility rank (simplified calculation based on price range)
-  const priceRange = highPrice - lowPrice;
-  const avgPrice = (highPrice + lowPrice) / 2;
-  const volatilityEstimate = avgPrice > 0 ? (priceRange / avgPrice) * 100 : 20;
-  const ivRank = Math.min(Math.max(volatilityEstimate * 2, 20), 80); // Rough IV rank estimate
-  
-  // Calculate wheel cycle metrics
-  const wheelPhase = hasPosition ? 'COVERED_CALL' : 'CASH_SECURED_PUT';
-  const optimalStrike = hasPosition 
-    ? (callStrikeZone[0]?.price || currentPrice * 1.05) 
-    : (putStrikeZone[putStrikeZone.length - 1]?.price || currentPrice * 0.95);
-  
   console.log('🎯 [WHEEL STRATEGY DEBUG] Analysis Input:', {
     ticker,
     currentPrice,
@@ -435,23 +263,195 @@ Deno.serve(async (req) => {
     costBasis,
     wheelPhase,
     optimalStrike,
-    callStrikeZone: callStrikeZone.map(r => r.price),
-    putStrikeZone: putStrikeZone.map(s => s.price),
-    portfolioValue: portfolio?.totalValue,
+    callStrikeZone,
+    putStrikeZone,
+    portfolioValue: totalValue,
     ivRank,
-    volatilityEstimate
+    volatilityEstimate,
   });
-  
+
   // ✂️ Limit list to safest length for o3 (≤8 positions ≈ 2k tokens max)
   const MAX_POSITIONS_FOR_PROMPT = 8;
-  const trimmedPositions = currentOptionPositions.slice(0, MAX_POSITIONS_FOR_PROMPT);
+  const trimmedPositions: CalculatedOption[] = currentOptionPositions.slice(0, MAX_POSITIONS_FOR_PROMPT);
   console.log(`🎯 [TOKEN LIMIT] Trimming ${currentOptionPositions.length} positions to ${trimmedPositions.length} for prompt`);
   
-  // Extract chart metrics
-  const firstMetric = (chartMetrics as ChartMetric[])[0];
-  const rsi = firstMetric?.rsi || 'Unknown';
-  const macd = firstMetric?.macd || 'Unknown';  
-  const trend = firstMetric?.trend || 'Unknown';
+  const buildFallbackAnalysis = (warning: string) => {
+    const fallbackPositions = trimmedPositions.map((position) => ({
+      symbol: position.symbol || ticker,
+      strike: position.strike || 0,
+      expiry: position.expiry || 'Unknown',
+      type: position.optionType || 'CALL',
+      contracts: position.contracts || 0,
+      premium: position.premiumCollected || 0,
+      currentValue: position.currentValue || 0,
+      profitLoss: position.profitLoss || 0,
+      markPnl: position.markPnl || 0,
+      wheelPnl: position.wheelPnl || 0,
+      delta: position.delta,
+      gamma: position.gamma,
+      theta: position.theta,
+      vega: position.vega,
+      iv: position.iv,
+    }));
+
+    const defaultRecommendation = [
+      { name: hasPosition ? 'Sell Calls' as const : 'Sell Puts' as const, value: 5 },
+      { name: 'Hold' as const, value: 3 },
+      { name: 'Close Position' as const, value: 2 },
+    ];
+
+    const marketSentiment = {
+      etfFlows: {
+        netFlows: String(isCryptoETF ? (etfFlows.netFlows ?? etfFlows.netFlow ?? 'No data') : 'N/A for non-ETF'),
+        trend: String(isCryptoETF ? (etfFlows.trend ?? 'No data') : 'N/A'),
+        impact: String(isCryptoETF ? (etfFlows.impact ?? 'No data') : 'N/A'),
+        recommendation: String(isCryptoETF ? (etfFlows.recommendation ?? 'Monitor flows for impact') : 'Focus on technical levels'),
+        source: etfFlows.source ? { url: etfFlows.source.url ?? '', asOf: etfFlows.source.asOf ?? currentDate } : undefined,
+      },
+      navAnalysis: {
+        premium: String(isCryptoETF ? (navData.premium ?? 'No NAV data') : 'N/A'),
+        discount: String(isCryptoETF ? (navData.discount ?? 'No NAV data') : 'N/A'),
+        interpretation: String(isCryptoETF ? (navData.interpretation ?? 'NAV data unavailable') : 'N/A'),
+        tradingOpportunity: String(isCryptoETF ? (navData.tradingOpportunity ?? 'Monitor for NAV updates') : 'N/A'),
+        source: navData.source ? { url: navData.source.url ?? '', asOf: navData.source.asOf ?? currentDate } : undefined,
+      },
+      volatilityMetrics: {
+        currentIV: String(currentIV),
+        ivRank: String(volatilityData.ivRank ?? ivRank.toFixed(1)),
+        callPutSkew: String(volatilityData.callPutSkew ?? volatilityData.skew ?? 'Unavailable'),
+        premiumEnvironment: Number(parseFloat(String(currentIV))) > 50 ? 'Rich - good for selling' : 'Moderate - balanced approach',
+        wheelStrategy: Number(parseFloat(String(currentIV))) > 50 ? 'Favor premium collection into strength' : 'Standard wheel execution conditions',
+      },
+      optionsFlow: {
+        largeOrders: String(optionsFlowData.largeOrders ?? 'No unusual activity detected'),
+        openInterest: String(optionsFlowData.openInterest ?? 'Standard distribution'),
+        putCallRatio: String(optionsFlowData.putCallRatio ?? optionsFlowData.pcRatio ?? 'Balanced'),
+        sentiment: String(optionsFlowData.sentiment ?? 'Neutral'),
+      },
+      upcomingCatalysts: upcomingEvents && Array.isArray(upcomingEvents) && upcomingEvents.length > 0
+        ? upcomingEvents.map((event: any) => ({
+            event: String(event.event ?? 'Upcoming Event'),
+            date: String(event.date ?? 'TBD'),
+            impact: String(event.impact ?? 'Medium'),
+            preparation: String(event.preparation ?? 'Review positioning'),
+            source: event.source ? { url: String(event.source.url ?? ''), asOf: String(event.source.asOf ?? currentDate) } : undefined,
+          }))
+        : [
+            {
+              event: 'Fed Meeting (FOMC)',
+              date: nextFedMeeting,
+              impact: 'High - affects all risk assets',
+              preparation: 'Consider reducing position size before announcement',
+              source: { url: 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm', asOf: currentDate },
+            },
+            {
+              event: 'Triple Witching',
+              date: tripleWitching,
+              impact: 'High - increased volatility',
+              preparation: 'Potential premium collection opportunity',
+              source: { url: 'calculated', asOf: currentDate },
+            },
+          ],
+      overallSentiment: {
+        summary: `Deterministic fallback: ${warning}`,
+        confidence: 'Low',
+        recommendation: 'Use wheel metrics above and rerun analysis later for AI summary.',
+      },
+    };
+
+    const positionSnapshot = [
+      {
+        type: 'Cash',
+        ticker: '',
+        quantity: 1,
+        strike: 0,
+        expiry: '',
+        basis: cashBalance,
+        currentValue: cashBalance,
+        pl: 0,
+        daysToExpiry: 0,
+        moneyness: '',
+        comment: cashBalance >= 6000 ? 'Above $6k buffer ✓' : 'Below $6k minimum buffer',
+      },
+      ...(hasPosition
+        ? [{
+            type: 'Shares',
+            ticker,
+            quantity: currentShares,
+            strike: 0,
+            expiry: '',
+            basis: costBasis,
+            currentValue: currentPrice * currentShares,
+            pl: (currentPrice - costBasis) * currentShares,
+            daysToExpiry: 0,
+            moneyness: '',
+            comment: 'Core wheel inventory',
+          }]
+        : []),
+      ...fallbackPositions.map((pos) => ({
+        type: wheelPhase === 'COVERED_CALL' ? 'Covered Call' : 'Cash-Secured Put',
+        ticker: pos.symbol || ticker,
+        quantity: pos.contracts,
+        strike: pos.strike,
+        expiry: pos.expiry,
+        premiumCollected: pos.premium ?? pos.premiumCollected ?? 0,
+        currentValue: pos.currentValue ?? 0,
+        wheelProfit: pos.wheelPnl ?? pos.wheelNet ?? 0,
+        daysToExpiry: pos.daysToExpiry ?? 0,
+        moneyness: pos.strike
+          ? `${currentPrice > pos.strike ? 'ITM' : 'OTM'} ${Math.abs(((currentPrice - pos.strike) / pos.strike) * 100).toFixed(1)}%`
+          : 'Unknown',
+        assignmentGain: pos.wheelPnl ?? 0,
+        comment: (pos.daysToExpiry ?? 0) > 365 ? 'Long-dated' : 'Short-dated',
+      }))
+    ];
+
+    return {
+      wheelStrategy: {
+        shareCount: currentShares,
+        currentPhase: wheelPhase,
+        currentPositions: fallbackPositions,
+      },
+      summary: {
+        currentPrice,
+        wheelPhase,
+        overallAssessment: warning,
+        netMarkToMarket: Math.round(stockUnreal + totalMarkPnl + totalPremiumCollected),
+        netWheelOutcome: Math.round(stockUnreal + totalWheelPnl),
+      },
+      recommendation: defaultRecommendation,
+      technicalFactors: [],
+      entryPoints: [],
+      exitPoints: [],
+      actionPlan: [],
+      optionsStrategy: 'AI summary unavailable; using deterministic fallback.',
+      marketSentiment,
+      recommendations: {
+        positionSnapshot,
+        rollAnalysis: [],
+        cashManagement: {
+          currentCash: cashBalance,
+          minimumRequired: 6000,
+          availableForTrades: cashBalance,
+          bufferRemaining: Math.max(0, cashBalance - 6000),
+          recommendation: cashBalance >= 6000
+            ? 'Cash buffer above minimum requirements.'
+            : 'Consider freeing cash to reach $6k buffer.',
+        },
+        actionPlan: {
+          beforeOpen: [hasPosition ? 'Review covered call strikes vs resistances.' : 'Review put strikes near supports.'],
+          duringHours: ['Monitor price vs key levels and delta thresholds.'],
+          endOfDay: ['Re-run analysis later for fresh AI guidance.'],
+        },
+        plainEnglishSummary: {
+          currentSituation: warning,
+          immediateActions: ['Review positions using fallback metrics.'],
+          monitoringPoints: ['Watch price relative to calculated strike zones.'],
+          nextReview: 'Next trading session',
+        },
+      },
+    };
+  };
 
   // 📊 PREPARE MARKET DATA FOR ANALYSIS
   // Extract real market data from marketData object (passed from frontend)
@@ -485,8 +485,10 @@ PORTFOLIO DATA:
 
 ${trimmedPositions.length > 0 ? 
 `UPLOADED OPTION POSITIONS (${trimmedPositions.length} positions):
-${trimmedPositions.map((opt: unknown, index: number) => {
-  const position = opt as Record<string, unknown>;
+${trimmedPositions.map((position, index) => {
+  const thetaText = position.theta !== null ? `$${Number(position.theta ?? 0).toFixed(2)}/day` : 'N/A';
+  const ivText = position.iv !== null ? `${Number((position.iv ?? 0) * 100).toFixed(1)}%` : 'N/A';
+  const deltaText = position.delta !== null ? position.delta : 'N/A';
   return `${index + 1}. $${position.strike} ${position.optionType} expiring ${position.expiry}
    - Contracts: ${position.contracts} (${position.position})
    - Premium Collected: $${position.premiumCollected || 0}
@@ -494,10 +496,10 @@ ${trimmedPositions.map((opt: unknown, index: number) => {
    - P&L: $${position.profitLoss || 0}
    - Intrinsic Value: $${position.intrinsic || 0}
    - Extrinsic Value: $${position.extrinsic || 0}
-   - Days to Expiry: ${position.daysToExpiry || 'Unknown'}
-   - Delta: ${position.delta !== null ? position.delta : 'N/A'}
-   - Theta: ${position.theta !== null ? `$${Number(position.theta).toFixed(2)}/day` : 'N/A'}
-   - IV: ${position.iv !== null ? `${(Number(position.iv) * 100).toFixed(1)}%` : 'N/A'}`;
+   - Days to Expiry: ${position.daysToExpiry ?? 'Unknown'}
+   - Delta: ${deltaText}
+   - Theta: ${thetaText}
+   - IV: ${ivText}`;
 }).join('\n')}
 
 TASK: For each position above, provide wheel strategy analysis:
@@ -538,8 +540,7 @@ Return this JSON structure:
     "shareCount": ${currentShares},
     "currentPhase": "${wheelPhase}",
     "currentPositions": [${trimmedPositions.length > 0 ? 
-      trimmedPositions.map((opt: unknown) => {
-        const position = opt as Record<string, unknown>;
+      trimmedPositions.map((position) => {
         return `{
         "symbol": "${position.symbol || 'UNKNOWN'}",
         "strike": ${position.strike || 0},
@@ -696,33 +697,37 @@ Return this JSON structure:
         "moneyness": "",
         "comment": "Core wheel inventory"
       },` : ''}
-      ${trimmedPositions.map((opt: unknown) => {
-        const position = opt as Record<string, unknown>;
+      ${trimmedPositions.map((position) => {
+        const strike = position.strike || 0;
+        const contractsAbs = Math.abs(position.contracts) || 1;
+        const moneynessPercent = strike !== 0 ? Math.abs(((currentPrice - strike) / strike) * 100).toFixed(1) : '0.0';
+        const assignmentGain = position.assignmentProfit || ((strike - costBasis) * 100 * contractsAbs) || 0;
+        const comment = (position.daysToExpiry ?? 0) > 365 ? 'Long-dated' : 'Short-dated';
         return `{
         "type": "Covered Call",
         "ticker": "${position.symbol || ticker}",
-        "quantity": ${Number(position.contracts) || 0},
-        "strike": ${position.strike || 0},
+        "quantity": ${position.contracts || 0},
+        "strike": ${strike},
         "expiry": "${position.expiry || 'Unknown'}",
         "premiumCollected": ${position.premiumCollected || 0},
         "currentValue": ${position.currentValue || 0},
         "wheelProfit": ${position.wheelNet || position.premiumCollected || 0},
-        "daysToExpiry": ${position.daysToExpiry || 0},
-        "moneyness": "${currentPrice > (position.strike as number || 0) ? 'ITM' : 'OTM'} ${Math.abs(((currentPrice - (position.strike as number || 0)) / (position.strike as number || 1)) * 100).toFixed(1)}%",
-        "assignmentGain": ${position.assignmentProfit || ((Number(position.strike) - costBasis) * 100 * Math.abs(Number(position.contracts))) || 0},
-        "comment": "${(position.daysToExpiry as number || 0) > 365 ? 'Long-dated' : 'Short-dated'}"
+        "daysToExpiry": ${position.daysToExpiry ?? 0},
+        "moneyness": "${currentPrice > strike ? 'ITM' : 'OTM'} ${moneynessPercent}%",
+        "assignmentGain": ${assignmentGain},
+        "comment": "${comment}"
       }`;
       }).join(',\n      ')}
     ],
     "rollAnalysis": [
-      ${trimmedPositions.map((opt: unknown) => {
-        const position = opt as Record<string, unknown>;
-        const strike = position.strike as number || 0;
+      ${trimmedPositions.map((position) => {
+        const strike = position.strike || 0;
         const priceThreshold = strike * 1.08;
         const deltaThreshold = 0.80;
-        const currentDelta = position.delta as number || null;
+        const currentDelta = typeof position.delta === 'number' ? position.delta : null;
         const moneyness = ((currentPrice - strike) / strike) * 100;
-        
+        const daysToExpiry = position.daysToExpiry ?? 0;
+
         return `{
         "position": "$${strike} ${position.optionType || 'CALL'} ${position.expiry}",
         "currentDelta": ${currentDelta !== null ? currentDelta : '"Estimate from moneyness"'},
@@ -742,14 +747,14 @@ Return this JSON structure:
         "action": "${
           currentPrice >= priceThreshold || (currentDelta !== null ? currentDelta >= deltaThreshold : moneyness > 5) 
             ? 'ROLL' 
-            : position.daysToExpiry as number <= 5 
+            : daysToExpiry <= 5 
               ? 'LET_EXPIRE' 
               : 'HOLD'
         }",
         "conditionalTrigger": ${
           currentPrice >= priceThreshold || (currentDelta !== null ? currentDelta >= deltaThreshold : moneyness > 5)
             ? '"Roll immediately"'
-            : position.daysToExpiry as number <= 5
+            : daysToExpiry <= 5
               ? '"Let expire on ' + position.expiry + '"'
               : '"If ' + ticker + ' closes ≥ $' + priceThreshold.toFixed(2) + ' or delta ≥ 0.80"'
         },
@@ -780,9 +785,8 @@ Return this JSON structure:
         "Verify cash buffer remains above $6,000"
       ],
       "duringHours": [
-        ${trimmedPositions.filter((opt: unknown) => {
-          const position = opt as Record<string, unknown>;
-          const strike = position.strike as number || 0;
+        ${trimmedPositions.filter((position) => {
+          const strike = position.strike || 0;
           return currentPrice >= strike * 1.08;
         }).length > 0
           ? '"Execute rolls for positions meeting criteria"'
@@ -792,10 +796,7 @@ Return this JSON structure:
       ],
       "endOfDay": [
         "Review closing price vs all triggers",
-        ${trimmedPositions.some((opt: unknown) => {
-          const position = opt as Record<string, unknown>;
-          return (position.daysToExpiry as number || 0) <= 1;
-        })
+        ${trimmedPositions.some((position) => (position.daysToExpiry ?? 0) <= 1)
           ? '"Prepare for tomorrow\'s expiration"'
           : '"Set alerts for tomorrow\'s trigger prices"'
         }
@@ -886,7 +887,7 @@ Return this JSON structure:
       // 🔧 Merge reliable Greeks from payload into AI output (LLM can drop fields)
       try {
         const positions = analysis?.wheelStrategy?.currentPositions as Array<Record<string, unknown>> | undefined;
-        if (positions && typeof optionGreeks === 'object' && optionGreeks !== null) {
+        if (positions && optionGreeks) {
           const normalizeExpiry = (s: string): string => {
             if (!s) return s;
             if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -903,7 +904,7 @@ Return this JSON structure:
             const expiry = normalizeExpiry(String(pos.expiry || ''));
             const optType = String((pos.optionType || pos.type || '')).toUpperCase();
             const key = `${sym}-${strike}-${expiry}-${optType}`;
-            const g = (optionGreeks as Record<string, OptionQuote | undefined>)[key];
+            const g = optionGreeks[key];
             if (g) {
               // Only patch if missing or null; do not change existing numbers
               if (pos.delta == null) pos.delta = g.delta;
@@ -930,7 +931,7 @@ Return this JSON structure:
             const expiry = normalizeExpiry(String(pos.expiry || ''));
             const optType = String((pos.optionType || pos.type || '')).toUpperCase();
             const key = `${sym}-${strike}-${expiry}-${optType}`;
-            const g = (optionGreeks as Record<string, OptionQuote | undefined>)[key];
+            const g = optionGreeks[key];
             
             if (g?.gamma != null) {
               console.log('🔍 [GAMMA MERGE DEBUG]', {
@@ -991,6 +992,16 @@ Return this JSON structure:
 
     return json({ success: true, analysis, confidence: analysis.confidence });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const aiRelated = message === 'AI_TIMEOUT' || message.startsWith('OpenAI');
+    if (aiRelated) {
+      console.error('⚠️ [AI FALLBACK] Returning deterministic analysis due to AI issue:', message);
+      const fallback = buildFallbackAnalysis(message === 'AI_TIMEOUT'
+        ? 'AI summary timed out. Showing baseline metrics.'
+        : `AI summary unavailable (${message}).`);
+      return json({ success: true, analysis: fallback, warning: message }, 200);
+    }
+
     console.error("integrated-analysis error:", err);
     return json({ success: false, error: String(err) }, 500);
   }

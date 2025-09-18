@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "tsc --noEmit && deno check supabase/functions/integrated-analysis-v2/index.ts supabase/functions/integrated-analysis-v2/strategies.ts supabase/functions/chart-vision/index.ts && eslint .",
     "preview": "vite preview",
     "diagnose:analysis": "node tests/diag-integrated-analysis.js",
     "deploy:ia": "supabase functions deploy integrated-analysis --project-ref twnldqhqbybnmqbsgvpq --use-api",

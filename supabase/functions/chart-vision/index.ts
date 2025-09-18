@@ -45,8 +45,14 @@ Deno.serve(async (req) => {
 
   const { image, ticker = "UNKNOWN", context = "chart", priceContext = {} } = payload;
 
-  if (!image) {
-    return jsonResponse({ success: false, error: "image is required" }, 400);
+  const normalizedImage = typeof image === "string"
+    ? image
+    : (image && typeof image === "object" && typeof (image as { url?: string }).url === "string"
+      ? (image as { url: string }).url
+      : null);
+
+  if (!normalizedImage) {
+    return jsonResponse({ success: false, error: "image (base64 or URL string) is required" }, 400);
   }
   if (!OPENAI_API_KEY) {
     return jsonResponse(
@@ -57,12 +63,14 @@ Deno.serve(async (req) => {
 
   /* ----------- OpenAI Vision call ----------- */
   try {
-  const MODEL = Deno.env.get("OPENAI_VISION_MODEL") ?? "gpt-5-mini";
+  const MODEL = Deno.env.get("OPENAI_VISION_MODEL") ?? "gpt-4o-mini";
+  const modelLower = MODEL.toLowerCase();
+  const USE_RESPONSES_API = modelLower.startsWith("gpt-5") || modelLower.startsWith("gpt-4o");
 
   let aiData: any;
   let txt = "";
 
-  if (/^gpt-5/.test(MODEL)) {
+  if (USE_RESPONSES_API) {
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -100,7 +108,7 @@ IMPORTANT: Never apologize or explain. Always return JSON even with limited info
           {
             role: "user",
             content: [
-              { type: "input_image", image_url: { url: image } },
+              { type: "input_image", image_url: normalizedImage },
               { type: "input_text", text: `Analyze this ${context} chart for ${ticker}.
 Current share price is $${priceContext.currentPrice ?? "Unknown"}.
 Timeframe ≈ ${priceContext.timeframe ?? "Unknown"}, covering ~${priceContext.rangeDays ?? "Unknown"} days.
@@ -172,7 +180,7 @@ IMPORTANT: Never apologize or explain. Always return JSON even with limited info
           {
             role: "user",
             content: [
-              { type: "image_url", image_url: { url: image } },
+              { type: "image_url", image_url: { url: normalizedImage } },
               {
                 type: "text",
                 text: `Analyze this ${context} chart for ${ticker}.

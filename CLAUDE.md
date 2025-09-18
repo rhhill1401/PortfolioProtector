@@ -15,12 +15,26 @@ npm run dev       # Start development server on http://localhost:5173
 # Build
 npm run build     # Type-check and build for production
 
-# Linting
-npm run lint      # Run ESLint on all files
+# Linting - MANDATORY AFTER ANY CODE CHANGES
+npm run lint      # Run ESLint on all files - MUST RUN AFTER EVERY CODE CHANGE
 
 # Preview production build
 npm run preview   # Preview production build locally
 ```
+
+## CRITICAL: Code Review Process
+
+**ALWAYS run these steps when reviewing or modifying code:**
+1. **Run `npm run lint` IMMEDIATELY after any code changes** - This catches unused variables and other issues
+2. **Check ESLint output** - Fix all errors (red) before considering the code complete
+3. **Address warnings** - Review yellow warnings for potential issues
+4. **Never rely on manual review alone** - Always use automated tools first
+
+### Common Issues ESLint Catches:
+- Unused variables (e.g., `'highPrice' is assigned a value but never used`)
+- Type safety issues
+- Complexity warnings
+- Code style violations
 
 ## Architecture Overview
 
@@ -176,10 +190,12 @@ npm run test:functions     # Verify functions are working
 Without `deno.json`, the bundler will hang during deployment
 
 ## Code Review Standards
+- **FIRST STEP**: Run `npm run lint` to catch all basic issues
 - After implementing any solution, refer to `/docs/CODE_REVIEW_STANDARDS.md`
 - Always follow the "Upgrade, Don't Replace" philosophy
 - Search for existing implementations before creating new code
 - Ensure all changes meet the code review checklist
+- **NEVER** skip linting - it catches issues humans miss
 
 ## Memories
 - Perfect what every you did to get that to work remember before we make our next tweeks

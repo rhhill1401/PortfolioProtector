@@ -10,17 +10,31 @@ PortfolioProtector is a React + TypeScript + Vite application for real-time mark
 
 ```bash
 # Development
-yarn dev          # Start development server on http://localhost:5173
+npm run dev       # Start development server on http://localhost:5173
 
 # Build
-yarn build        # Type-check and build for production
+npm run build     # Type-check and build for production
 
-# Linting
-yarn lint         # Run ESLint on all files
+# Linting - MANDATORY AFTER ANY CODE CHANGES
+npm run lint      # Run ESLint on all files - MUST RUN AFTER EVERY CODE CHANGE
 
 # Preview production build
-yarn preview      # Preview production build locally
+npm run preview   # Preview production build locally
 ```
+
+## CRITICAL: Code Review Process
+
+**ALWAYS run these steps when reviewing or modifying code:**
+1. **Run `npm run lint` IMMEDIATELY after any code changes** - This catches unused variables and other issues
+2. **Check ESLint output** - Fix all errors (red) before considering the code complete
+3. **Address warnings** - Review yellow warnings for potential issues
+4. **Never rely on manual review alone** - Always use automated tools first
+
+### Common Issues ESLint Catches:
+- Unused variables (e.g., `'highPrice' is assigned a value but never used`)
+- Type safety issues
+- Complexity warnings
+- Code style violations
 
 ## Architecture Overview
 
@@ -32,6 +46,7 @@ yarn preview      # Preview production build locally
 - **shadcn/ui components** (custom implementations in `/src/components/ui/`)
 - **Axios** for API requests
 - **PapaParse** for CSV parsing
+- **Package Manager**: npm (DO NOT use yarn)
 
 ### Core Components
 
@@ -121,14 +136,83 @@ VITE_SUPABASE_FN_URL=your_functions_url
 ## Troubleshooting Tips
 - For any troubleshooting, always use Puppeteer to navigate to localhost:5173
 
+## Supabase Deployment Rules
+
+### 1. Authentication Required Before Deployment
+**CRITICAL**: Always verify Supabase authentication before attempting any deployments:
+```bash
+# Check if logged in by testing a simple command
+supabase projects list
+
+# If it hangs or fails, login first:
+supabase login
+```
+- The login command opens a browser for authentication
+- Without authentication, ALL deployment commands will hang indefinitely with no error message
+- Access token is stored in ~/Library/Application Support/supabase/access-token
+
+### 2. Use API Flag for Deployments
+**MANDATORY**: Always use `--use-api` flag when deploying Supabase functions:
+```bash
+# CORRECT - Uses Management API (works)
+supabase functions deploy [function-name] --project-ref twnldqhqbybnmqbsgvpq --use-api
+
+# WRONG - Uses Docker (hangs on macOS)
+supabase functions deploy [function-name] --project-ref twnldqhqbybnmqbsgvpq
+```
+- Docker-based bundling (`--use-docker` default) hangs on macOS systems
+- The `--use-api` flag uses Supabase's Management API for remote bundling
+- This is a known issue with Docker Desktop on macOS
+
+### 3. Use NPM Scripts for Deployment
+**ALWAYS USE THESE NPM SCRIPTS** instead of manual Supabase commands:
+```bash
+# Deploy specific functions
+npm run deploy:ia          # Deploy integrated-analysis
+npm run deploy:chart       # Deploy chart-vision
+npm run deploy:portfolio   # Deploy portfolio-vision
+npm run deploy:options     # Deploy all option functions
+npm run deploy:all         # Deploy everything
+
+# Test after deployment
+npm run test:functions     # Verify functions are working
+```
+- These scripts automatically include the correct project-ref and --use-api flag
+- Prevents forgetting flags or typing wrong project references
+- Located in package.json scripts section
+
+### 4. Required Files for Function Deployment
+**EVERY Supabase Edge Function MUST have**:
+1. `index.ts` - The function code with `Deno.serve()`
+2. `deno.json` - Even if just `{"imports": {}}` 
+3. No test files in the function directory (move to `/tests/`)
+
+Without `deno.json`, the bundler will hang during deployment
+
 ## Code Review Standards
+- **FIRST STEP**: Run `npm run lint` to catch all basic issues
 - After implementing any solution, refer to `/docs/CODE_REVIEW_STANDARDS.md`
 - Always follow the "Upgrade, Don't Replace" philosophy
 - Search for existing implementations before creating new code
 - Ensure all changes meet the code review checklist
+- **NEVER** skip linting - it catches issues humans miss
 
 ## Memories
 - Perfect what every you did to get that to work remember before we make our next tweeks
+
+### Supabase Deployment Fix (2025-09-07)
+**Problem**: Supabase CLI deploy commands were hanging indefinitely without error messages
+**Root Causes**: 
+1. Not authenticated (`supabase login` required)
+2. Docker bundling hangs on macOS (must use `--use-api` flag)
+**Solution**: Created npm scripts that automatically use correct flags
+**Key Learning**: Always check authentication first when Supabase commands hang
+
+## Package Manager
+**IMPORTANT**: This project uses **npm** exclusively. Do NOT use yarn.
+- Always use `npm install` for dependencies
+- Always use `npm run <script>` for scripts
+- The `package-lock.json` file must be committed
 
 ## Options Trading Lessons Learned (2025-07-05)
 

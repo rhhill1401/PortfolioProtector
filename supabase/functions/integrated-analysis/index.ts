@@ -193,15 +193,9 @@ Deno.serve(async (req) => {
   }
   
   function calcOptionMetrics(opt: Record<string, unknown>, spotPrice: number, costBasis: number, greeks?: OptionQuote): CalculatedOption {
-    // Handle premium - could be per-share or total depending on source
-    let prem = Number(opt.premiumCollected) || 0;
+    // Handle premium - trust the value from portfolio-vision, it's already in total format
+    const prem = Number(opt.premiumCollected) || 0;
     const cnt  = Math.abs(Number(opt.contracts) || 1);
-    
-    // If premium seems too small (< $100), it's likely per-share and needs conversion
-    if (prem > 0 && prem < 100) {
-      prem = prem * 100 * cnt; // Convert per-share to total premium
-      console.log(`📊 Converted premium from per-share $${(prem / (100 * cnt)).toFixed(2)} to total $${prem.toFixed(2)}`);
-    }
     
     const cur  = Number(opt.currentValue) || 0;
     const strike = Number(opt.strike) || 0;
@@ -234,12 +228,12 @@ Deno.serve(async (req) => {
       : Math.max(0, strike - spotPrice) * 100 * cnt;
     const extrinsic = Math.max(0, cur - intrinsic);
     
-    // Add Greeks if available
-    const delta = greeks?.delta as number | null || null;
-    const gamma = greeks?.gamma as number | null || null;
-    const theta = greeks?.theta as number | null || null;
-    const vega = greeks?.vega as number | null || null;
-    const iv = greeks?.iv as number | null || null;
+    // Return raw Greeks (leave display formatting to the UI)
+    const delta = greeks?.delta ?? null;
+    const gamma = greeks?.gamma ?? null;
+    const theta = greeks?.theta ?? null;
+    const vega  = greeks?.vega  ?? null;
+    const iv    = greeks?.iv    ?? null; // keep as fraction (0..1); UI will scale to %
     
     return { 
       ...opt, 
@@ -260,6 +254,32 @@ Deno.serve(async (req) => {
     };
   }
   
+  // Helper functions for normalizing option keys
+  function toIsoDate(input: unknown): string {
+    if (!input) return "";
+    const s = String(input).trim();
+    // already ISO
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // e.g., "Sep-30-2025" or "Sep 30, 2025"
+    const tryParsed = new Date(s.replace(/-/g, " ").replace(/,/g, ""));
+    if (!isNaN(tryParsed.getTime())) {
+      const y = tryParsed.getFullYear();
+      const m = String(tryParsed.getMonth() + 1).padStart(2, "0");
+      const d = String(tryParsed.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+    return s; // last resort
+  }
+
+  function normType(t: unknown): "CALL" | "PUT" {
+    return String(t).toUpperCase() === "PUT" ? "PUT" : "CALL";
+  }
+
+  function normStrike(v: unknown): string {
+    const n = Number(v);
+    return Number.isFinite(n) ? String(n) : String(v ?? "");
+  }
+
   // Debug: Log optionGreeks to see what we received
   console.log('🔍 [DEBUG] optionGreeks received:', {
     hasOptionGreeks: !!optionGreeks,
@@ -269,19 +289,25 @@ Deno.serve(async (req) => {
     firstValue: optionGreeks?.[Object.keys(optionGreeks || {})[0]]
   });
 
-  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, unknown>) => {
-    // Get Greeks for this position if available
-    const positionKey = `${opt.symbol}-${opt.strike}-${opt.expiry}-${opt.optionType}`;
-    const positionGreeks = optionGreeks && optionGreeks[positionKey] as OptionQuote | undefined;
-    
-    // Debug: Log each position lookup
-    console.log(`🔍 [DEBUG] Looking up Greeks for position:`, {
-      position: `${opt.symbol} ${opt.strike} ${opt.expiry} ${opt.optionType}`,
-      positionKey,
-      greeksFound: !!positionGreeks,
-      delta: positionGreeks?.delta
+  const optionPositions = (portfolio?.metadata?.optionPositions || []).map((opt: Record<string, any>) => {
+    const symbol = String(opt.symbol || ticker).toUpperCase();
+    const strike = normStrike(opt.strike);
+    const expiryIso = toIsoDate(opt.expiry);
+    const type = normType(opt.optionType);
+
+    // primary key (ISO); also try raw for backward compatibility
+    const primaryKey = `${symbol}-${strike}-${expiryIso}-${type}`;
+    const rawKey = `${symbol}-${strike}-${String(opt.expiry || "")}-${type}`;
+
+    const positionGreeks =
+      (optionGreeks as Record<string, OptionQuote>)[primaryKey] ??
+      (optionGreeks as Record<string, OptionQuote>)[rawKey];
+
+    console.log("🔍 [DEBUG] Greeks lookup:", {
+      symbol, strike, expiryRaw: String(opt.expiry || ""), expiryIso, type,
+      primaryKey, rawKey, found: !!positionGreeks, delta: positionGreeks?.delta
     });
-    
+
     return calcOptionMetrics(opt, currentPrice, costBasis, positionGreeks);
   });
   const currentOptionPositions =

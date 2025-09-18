@@ -11,6 +11,8 @@ import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import axios from 'axios';
 import { useOptionChain } from '@/hooks/useOptionChain';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
+import { useMarketContext } from '@/hooks/useMarketContext';
+import { useEtfFlows } from '@/hooks/useEtfFlows';
 import { 
 	compounding,
 	estimateAssignmentProb
@@ -47,10 +49,11 @@ interface ExitStrategyPoint {
 }
 
 interface KeyLevel {
-	price: number;
-	type: 'Support' | 'Resistance' | 'Current';
-	significance: string;
-	description: string;
+    price: number;
+    type: 'Support' | 'Resistance' | 'Current';
+    significance: string;
+    description: string;
+    strength?: string; // from chart-vision
 }
 
 interface FundamentalMetric {
@@ -65,6 +68,57 @@ interface VixImpact {
 	effect: string;
 	impact: string;
 	action: string;
+}
+
+interface MarketSentiment {
+	etfFlows?: {
+		netFlows: string;
+		trend: string;
+		impact: string;
+		recommendation: string;
+		source?: {
+			url: string;
+			asOf: string;
+		};
+	};
+	navAnalysis?: {
+		premium: string;
+		discount: string;
+		interpretation: string;
+		tradingOpportunity: string;
+		source?: {
+			url: string;
+			asOf: string;
+		};
+	};
+	volatilityMetrics?: {
+		currentIV: string;
+		ivRank: string;
+		callPutSkew: string;
+		premiumEnvironment: string;
+		wheelStrategy: string;
+	};
+	optionsFlow?: {
+		largeOrders: string;
+		openInterest: string;
+		putCallRatio: string;
+		sentiment: string;
+	};
+	upcomingCatalysts?: Array<{
+		event: string;
+		date: string;
+		impact: string;
+		preparation: string;
+		source?: {
+			url: string;
+			asOf: string;
+		};
+	}> | string;
+	overallSentiment?: {
+		summary: string;
+		confidence: string;
+		recommendation: string;
+	};
 }
 
 interface PriceInfo {
@@ -111,18 +165,36 @@ interface AnalysisDetail {
 }
 
 interface WheelPosition {
-	strike: number;
-	expiry: string;
-	type: 'Call' | 'Put';
-	contracts: number;
-	premium: number;
-	cycleReturn: string;
-	status: string;
-	assignmentProb: string;
-	nextAction: string;
-	daysToExpiry: number;
-	term: 'LONG_DATED' | 'SHORT_DATED';
-	position: 'SHORT' | 'LONG';
+    // Core
+    symbol?: string;
+    strike: number;
+    expiry: string;
+    type?: 'CALL' | 'PUT' | 'Call' | 'Put';
+    optionType?: 'CALL' | 'PUT';
+    contracts: number;
+    status: string;
+    position: 'SHORT' | 'LONG';
+    // Premiums/values
+    premium?: number;
+    premiumCollected?: number;
+    currentValue?: number;
+    cycleReturn?: string | number;
+    // Wheel P&L / MTM
+    wheelPnl?: number;
+    wheelNet?: number;
+    markPnl?: number;
+    optionMTM?: number;
+    // Greeks
+    delta?: number | null;
+    gamma?: number | null;
+    theta?: number | null;
+    iv?: number | null;
+    // Timing
+    daysToExpiry: number;
+    term: 'LONG_DATED' | 'SHORT_DATED';
+    // Guidance
+    assignmentProb: string;
+    nextAction: string;
 }
 
 interface WheelStrategy {
@@ -139,7 +211,7 @@ interface WheelStrategy {
 }
 
 interface StockAnalysisData {
-	summary: AnalysisSummary;
+    summary: AnalysisSummary;
 	opportunity?: string; // NEW – from integrated‑analysis
 	risk?: string; // already present but optional
 	detail?: AnalysisDetail; // NEW – nested detail object
@@ -153,11 +225,67 @@ interface StockAnalysisData {
 	keyLevels: KeyLevel[];
 	fundamentals: FundamentalMetric[];
 	vixImpact: VixImpact[];
-	recommendation: RecommendationDataPoint[];
-	confidence?: number;
-	additionalDataNeeded?: string;
-	wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
-	vix?: number; // VIX value for volatility display
+    recommendation: RecommendationDataPoint[];
+    confidence?: number;
+    additionalDataNeeded?: string;
+    wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
+    vix?: number; // VIX value for volatility display
+    marketSentiment?: MarketSentiment; // NEW - comprehensive market analysis
+    // Optional nested recommendations object produced by integrated-analysis
+        recommendations?: {
+            positionSnapshot?: Array<{
+                type: string;
+                ticker?: string;
+                quantity?: number;
+                strike?: number;
+                expiry?: string;
+                basis?: number;
+                pl?: number;
+                premiumCollected?: number;
+                currentValue?: number;
+                wheelProfit?: number;
+                daysToExpiry?: number;
+                moneyness?: string;
+                comment?: string;
+            }>;
+        rollAnalysis?: Array<{
+            position: string;
+            currentDelta: number | string | null;
+            moneyness: number | string;
+            ruleA: { triggered: boolean; threshold: number; current: number; detail: string };
+            ruleB: { triggered: boolean; threshold: number; current: number | string; detail: string };
+            action: string;
+            conditionalTrigger: string;
+            recommendation: string;
+        }>;
+        cashManagement?: {
+            currentCash: number;
+            minimumRequired: number;
+            availableForTrades: number;
+            bufferRemaining?: number;
+            maxPutStrike?: number;
+            recommendation: string;
+        };
+        actionPlan?: {
+            beforeOpen?: string[];
+            duringHours?: string[];
+            endOfDay?: string[];
+        };
+        plainEnglishSummary?: {
+            currentSituation: string;
+            immediateActions?: string[];
+            monitoringPoints?: string[];
+            nextReview?: string;
+        };
+    };
+    // Optional chart metrics injected from frontend
+    chartMetrics?: Array<{
+        timeframe?: string;
+        keyLevels?: KeyLevel[];
+        trend?: string;
+        rsi?: string;
+        macd?: string;
+    }>;
 }
 
 
@@ -192,15 +320,42 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const [isAnalyzing, setIsAnalyzing] = useState(false);
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
+
+	// UI formatting helpers for Greeks
+	const fmtNoLeadZero = (v: number | null | undefined, decimals = 2): string => {
+		if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
+		return Math.abs(v).toFixed(decimals).replace(/^0(?=\.)/, '.');
+	};
+
+	const fmtIV = (iv: number | null | undefined): string => {
+		if (iv === null || iv === undefined || Number.isNaN(iv)) return 'N/A';
+		const val = Math.abs(iv);
+		const pct = val > 1.5 ? val : val * 100; // handle percent vs fraction inputs
+		return `${pct.toFixed(2)}%`;
+	};
+
+	const fmtTheta = (theta: number | null | undefined): string => fmtNoLeadZero(theta, 2);
 	
 	const { data: optionChainData } = useOptionChain(tickerSymbol);
+	
+	// Fetch market context data independently
+	// Skip Market Context for BOTH mode (comma-separated tickers)
+	const mcTicker = !tickerSymbol || tickerSymbol.includes(',') || tickerSymbol === 'BOTH' 
+		? null 
+		: tickerSymbol;
+	const { marketData: marketContextData, loading: marketContextLoading } = useMarketContext(mcTicker as string);
+	
+	// Fetch ETF flows separately for supported tickers
+	const { data: etfFlowsData, loading: etfFlowsLoading } = useEtfFlows(
+		(tickerSymbol === 'IBIT' || tickerSymbol === 'ETHA') ? tickerSymbol : null
+	);
 	
 	// Fetch real-time quotes for wheel positions
 	// Convert date format from 'Jul-18-2025' to '2025-07-18' for API compatibility
 	const wheelPositions = useMemo(() => {
 		if (!analysisData?.wheelStrategy?.currentPositions) return [];
 		
-		return analysisData.wheelStrategy.currentPositions.map(pos => {
+        return analysisData.wheelStrategy.currentPositions.map(pos => {
 			/**
 			 * Convert option expiry strings to Polygon's required YYYY-MM-DD format.
 			 *
@@ -240,16 +395,16 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			};
 			
 			// Map position ensuring we keep all fields including premium data
-			const mappedPosition = {
-				symbol: pos.symbol,
-				strike: pos.strike,
-				expiry: parseExpiry(pos.expiry),
-				type: (pos.optionType || pos.type || 'CALL') as 'CALL' | 'PUT',
-				contracts: pos.contracts,
-				// Include both possible premium field names
-				premium: pos.premium,
-				premiumCollected: pos.premiumCollected
-			};
+            const mappedPosition = {
+                symbol: pos.symbol ?? tickerSymbol,
+                strike: pos.strike,
+                expiry: parseExpiry(pos.expiry),
+                type: (pos.optionType || pos.type || 'CALL') as 'CALL' | 'PUT',
+                contracts: pos.contracts,
+                // Include both possible premium field names
+                premium: pos.premium,
+                premiumCollected: pos.premiumCollected
+            };
 			
 			console.log('[WHEEL POSITIONS] Mapped position:', mappedPosition);
 			return mappedPosition;
@@ -268,6 +423,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				keyLevels: analysisData.keyLevels ?? [],
 				fundamentals: analysisData.fundamentals ?? [],
 				vixImpact: analysisData.vixImpact ?? [],
+				marketSentiment: analysisData.marketSentiment ?? {},
 				recommendation: toPieArray(analysisData.recommendation),
 		  }
 		: null;
@@ -298,7 +454,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	}, [tickerSymbol]);
 
 	useEffect(() => {
-		const handler = (e: CustomEvent<{[key: string]: unknown}>) => {
+    const handler = (e: CustomEvent<StockAnalysisData & { wheelAnalysis?: WheelStrategy }>) => {
 			console.log('🔍 [AI RESPONSE DEBUG] Raw AI Response Received:', {
 				timestamp: new Date().toISOString(),
 				fullResponse: e.detail,
@@ -316,28 +472,28 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 					hasActionPlan: !!e.detail.actionPlan,
 					hasOptionsStrategy: !!e.detail.optionsStrategy,
 					hasWheelAnalysis: !!e.detail.wheelAnalysis,
-					hasDashboardMetrics: !!e.detail.dashboardMetrics,
+                // hasDashboardMetrics: !!(e.detail as any).dashboardMetrics,
 					allKeys: Object.keys(e.detail)
 				});
 				
-				// Log specific sections that might be wheel-related
-				if (e.detail.optionsStrategy) {
-					console.log('⚙️ [OPTIONS STRATEGY]', e.detail.optionsStrategy);
-				}
-				if (e.detail.recommendation) {
-					console.log('💡 [RECOMMENDATION]', e.detail.recommendation);
-				}
-				if (e.detail.actionPlan) {
-					console.log('📋 [ACTION PLAN]', e.detail.actionPlan);
-				}
-				if (e.detail.technicalFactors) {
-					console.log('📈 [TECHNICAL FACTORS]', e.detail.technicalFactors);
-				}
-			}
+        // Log specific sections that might be wheel-related
+        if (e.detail.optionsStrategy) {
+            console.log('⚙️ [OPTIONS STRATEGY]', e.detail.optionsStrategy);
+        }
+        if (e.detail.recommendation) {
+            console.log('💡 [RECOMMENDATION]', e.detail.recommendation);
+        }
+        if (e.detail.actionPlan) {
+            console.log('📋 [ACTION PLAN]', e.detail.actionPlan);
+        }
+        if (e.detail.technicalFactors) {
+            console.log('📈 [TECHNICAL FACTORS]', e.detail.technicalFactors);
+        }
+        }
 			
 			// 🎯 CRITICAL: Log the wheel strategy data when it arrives
 			// Note: The data comes as 'wheelAnalysis' from the edge function
-			const wheelData = e.detail.wheelAnalysis || e.detail.wheelStrategy;
+        const wheelData = (e.detail as any).wheelAnalysis || e.detail.wheelStrategy;
 			console.log('🚀🚀🚀 [WHEEL STRATEGY DATA RECEIVED]', {
 				timestamp: new Date().toISOString(),
 				hasWheelStrategy: !!wheelData,
@@ -347,37 +503,39 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			});
 
 			// 🔍 VERIFY: Does AI see your actual portfolio positions?
-			if (wheelData?.currentPositions && wheelData.currentPositions.length > 0) {
-				console.log('✅ [AI SEES YOUR POSITIONS]', {
-					positionCount: wheelData.currentPositions.length,
-					firstPosition: wheelData.currentPositions[0],
-					allStrikes: wheelData.currentPositions.map(p => p.strike),
-					allReturns: wheelData.currentPositions.map(p => p.cycleReturn),
-					wheelPhase: wheelData.currentPhase
-				});
-			} else {
-				console.log('❌ [AI DEFAULTING TO GENERIC] No specific positions found in AI response:', {
-					wheelAnalysis: e.detail.wheelAnalysis,
+        if (wheelData?.currentPositions && wheelData.currentPositions.length > 0) {
+            console.log('✅ [AI SEES YOUR POSITIONS]', {
+                positionCount: wheelData.currentPositions.length,
+                firstPosition: wheelData.currentPositions[0],
+                allStrikes: wheelData.currentPositions.map((p: any) => p.strike),
+                allReturns: wheelData.currentPositions.map((p: any) => p.cycleReturn),
+                wheelPhase: wheelData.currentPhase
+            });
+        } else {
+            console.log('❌ [AI DEFAULTING TO GENERIC] No specific positions found in AI response:', {
+                wheelAnalysis: e.detail.wheelAnalysis,
 					wheelStrategy: e.detail.wheelStrategy
 				});
 			}
 			
 			// Normalize the data structure - handle both wheelAnalysis and wheelStrategy
-			const normalizedData = {
-				...e.detail,
-				wheelStrategy: e.detail.wheelAnalysis || e.detail.wheelStrategy
-			};
+        const normalizedData = {
+            ...(e.detail as any),
+            wheelStrategy: (e.detail as any).wheelAnalysis || e.detail.wheelStrategy
+        } as StockAnalysisData;
 			
 			// Add error handling before setting state
 			try {
 				console.log('📊 [STOCK ANALYSIS] About to set analysis data:', normalizedData);
 				setAnalysisData(normalizedData); // fills tabs
 				console.log('✅ [STOCK ANALYSIS] Analysis data set successfully');
-			} catch (error) {
-				console.error('❌ [STOCK ANALYSIS] Error setting analysis data:', error);
-				console.error('Error stack:', error.stack);
-				console.error('Normalized data that caused error:', normalizedData);
-			}
+        } catch (error) {
+            console.error('❌ [STOCK ANALYSIS] Error setting analysis data:', error);
+            if (error instanceof Error) {
+                console.error('Error stack:', error.stack);
+            }
+            console.error('Normalized data that caused error:', normalizedData);
+        }
 		};
 		window.addEventListener('analysis-ready', handler as EventListener);
 		return () =>
@@ -748,14 +906,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 						<TabsContent
 							value='performance'
 							className='space-y-4'>
-							{/* DEBUG: Log wheel strategy data */}
-							{console.log('🎯 [PERFORMANCE TAB] Rendering with data:', {
-								hasAnalysisData: !!analysisData,
-								hasWheelStrategy: !!analysisData?.wheelStrategy,
-								wheelStrategy: analysisData?.wheelStrategy,
-								currentPhase: analysisData?.wheelStrategy?.currentPhase,
-								positions: analysisData?.wheelStrategy?.currentPositions
-							})}
+                        {/* Debug logging removed from JSX to satisfy ReactNode typing */}
 							
 							{analysisData?.wheelStrategy ? (
 								<>
@@ -838,25 +989,25 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 																<div>
 																	<span className="text-gray-600">Delta: </span>
 																	<span className="font-semibold">
-																		{position.delta !== null && position.delta !== undefined ? position.delta.toFixed(3) : 'N/A'}
+                  {position.delta !== null && position.delta !== undefined ? position.delta.toFixed(2) : 'N/A'}
 																	</span>
 																</div>
 																<div>
 																	<span className="text-gray-600">Theta: </span>
 																	<span className="font-semibold">
-																		{position.theta !== null && position.theta !== undefined ? `$${position.theta.toFixed(2)}/day` : 'N/A'}
+																			{fmtTheta(position.theta)}
 																	</span>
 																</div>
 																<div>
 																	<span className="text-gray-600">Gamma: </span>
 																	<span className="font-semibold">
-																		{position.gamma !== null && position.gamma !== undefined ? position.gamma.toFixed(3) : 'N/A'}
+																			{position.gamma !== null && position.gamma !== undefined ? fmtNoLeadZero(position.gamma, 2) : 'N/A'}
 																	</span>
 																</div>
 																<div>
 																	<span className="text-gray-600">IV: </span>
 																	<span className="font-semibold">
-																		{position.iv !== null && position.iv !== undefined ? `${(position.iv * 100).toFixed(1)}%` : 'N/A'}
+																			{fmtIV(position.iv)}
 																	</span>
 																</div>
 															</div>
@@ -1082,9 +1233,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 													
 													// Calculate overall metrics
 													const goodQuotes = wheelQuotes.filter(q => q.success && q.quote);
-													const overallMetrics = goodQuotes.length > 0 
-														? calculateAggregateMetrics(positions, wheelQuotes)
-														: null;
+                                const overallMetrics = goodQuotes.length > 0 
+                                    ? calculateAggregateMetrics(
+                                        positions.map(p => ({
+                                            symbol: p.symbol || tickerSymbol,
+                                            strike: p.strike,
+                                            expiry: p.expiry,
+                                            type: (p.optionType || p.type || 'CALL') as 'CALL' | 'PUT',
+                                            contracts: p.contracts,
+                                            premium: p.premium ?? p.premiumCollected
+                                        })),
+                                        wheelQuotes
+                                      )
+                                    : null;
 													
 													const totalPremiumCollected = overallMetrics?.totalPremiumCollected || 0;
 													const totalCostToClose = overallMetrics?.totalCostToClose || 0;
@@ -1286,48 +1447,74 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											</CardDescription>
 										</CardHeader>
 										<CardContent>
-											<div className="overflow-x-auto">
-												<table className="w-full text-sm">
-													<thead>
-														<tr className="border-b">
-															<th className="text-left py-2">Type</th>
-															<th className="text-left py-2">Symbol</th>
-															<th className="text-right py-2">Qty</th>
-															<th className="text-right py-2">Strike/Basis</th>
-															<th className="text-right py-2">Premium</th>
-															<th className="text-right py-2">Profit</th>
-															<th className="text-left py-2">Status</th>
-														</tr>
-													</thead>
-													<tbody>
-														{analysisData.recommendations.positionSnapshot?.map((position, idx) => (
-															<tr key={idx} className="border-b">
-																<td className="py-2">{position.type}</td>
-																<td className="py-2">{position.ticker || '—'}</td>
-																<td className="text-right py-2">{position.quantity}</td>
-																<td className="text-right py-2">${Math.round(position.strike || position.basis).toLocaleString()}</td>
-																<td className="text-right py-2">
-																	{position.type === 'Covered Call' && position.premiumCollected ? 
-																		`$${Math.round(position.premiumCollected).toLocaleString()}` : 
-																		`$${Math.round(position.currentValue).toLocaleString()}`
-																	}
-																</td>
-																<td className={`text-right py-2 font-medium ${
-																	position.type === 'Covered Call' ? 'text-green-600' : 
-																	position.pl >= 0 ? 'text-green-600' : 'text-red-600'
-																}`}>
-																	{position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
-																		`$${Math.round(position.wheelProfit).toLocaleString()}` :
-																		position.type === 'Cash' ? '—' :
-																		position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
-																	}
-																</td>
-																<td className="py-2 text-xs text-gray-600 pl-4">{position.comment}</td>
-															</tr>
-														))}
-													</tbody>
-												</table>
-											</div>
+											{(() => {
+												const cashPosition = analysisData.recommendations.positionSnapshot?.find(p => p.type === 'Cash');
+												const otherPositions = analysisData.recommendations.positionSnapshot?.filter(p => p.type !== 'Cash') || [];
+												
+												return (
+													<>
+														{/* Cash Balance Display */}
+														{cashPosition && (
+															<div className="mb-4 p-3 bg-gray-50 rounded-lg">
+																<div className="flex justify-between items-center">
+																	<div>
+																		<span className="text-sm font-medium text-gray-700">Cash Balance</span>
+																		{cashPosition.comment && (
+																			<span className="ml-2 text-xs text-gray-500">({cashPosition.comment})</span>
+																		)}
+																	</div>
+																	<span className="text-lg font-semibold">
+																		${Math.round(cashPosition.currentValue || 0).toLocaleString()}
+																	</span>
+																</div>
+															</div>
+														)}
+														
+														{/* Positions Table */}
+														<div className="overflow-x-auto">
+															<table className="w-full text-sm">
+																<thead>
+																	<tr className="border-b">
+																		<th className="text-left py-2">Type</th>
+																		<th className="text-left py-2">Symbol</th>
+																		<th className="text-right py-2">Qty</th>
+																		<th className="text-right py-2">Strike/Basis</th>
+																		<th className="text-right py-2">Premium</th>
+																		<th className="text-right py-2">Profit</th>
+																		<th className="text-left py-2">Status</th>
+																	</tr>
+																</thead>
+																<tbody>
+																	{otherPositions.map((position, idx) => (
+																		<tr key={idx} className="border-b">
+																			<td className="py-2">{position.type}</td>
+																			<td className="py-2">{position.ticker || '—'}</td>
+																			<td className="text-right py-2">{position.quantity}</td>
+																			<td className="text-right py-2">${Math.round((position.strike ?? position.basis ?? 0)).toLocaleString()}</td>
+																			<td className="text-right py-2">
+																				{position.type === 'Covered Call' && position.premiumCollected !== undefined ? 
+																					`$${Math.round(position.premiumCollected).toLocaleString()}` : 
+																					`$${Math.round((position.currentValue ?? 0)).toLocaleString()}`
+																				}
+																			</td>
+																			<td className={`text-right py-2 font-medium ${
+																				position.type === 'Covered Call' ? 'text-green-600' : 
+																				(position.pl ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'
+																			}`}>
+																				{position.type === 'Covered Call' && position.wheelProfit !== undefined ? 
+																					`$${Math.round(position.wheelProfit).toLocaleString()}` :
+																					position.pl !== undefined ? `$${Math.round(position.pl).toLocaleString()}` : '—'
+																				}
+																			</td>
+																			<td className="py-2 text-xs text-gray-600 pl-4">{position.comment}</td>
+																		</tr>
+																	))}
+																</tbody>
+															</table>
+														</div>
+													</>
+												);
+											})()}
 										</CardContent>
 									</Card>
 
@@ -1340,35 +1527,40 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											</CardDescription>
 										</CardHeader>
 										<CardContent className="space-y-4">
-											{analysisData.recommendations.rollAnalysis?.map((roll, idx) => (
-												<div key={idx} className="border rounded-lg p-4 bg-gray-50">
-													<div className="flex justify-between items-start mb-2">
-														<h4 className="font-semibold">{roll.position}</h4>
-														<span className={`px-2 py-1 rounded text-xs font-medium ${
-															roll.action === 'ROLL' ? 'bg-yellow-100 text-yellow-800' :
-															roll.action === 'HOLD' ? 'bg-green-100 text-green-800' :
-															'bg-gray-100 text-gray-800'
-														}`}>
-															{roll.action}
-														</span>
-													</div>
-													
-													<div className="grid grid-cols-2 gap-4 text-sm">
-														<div>
-															<p className="text-gray-600">Rule A (Price ≥ Strike × 1.08)</p>
-															<p className={`font-medium ${roll.ruleA.triggered ? 'text-red-600' : 'text-green-600'}`}>
-																{roll.ruleA.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
-															</p>
-															<p className="text-xs text-gray-500">{roll.ruleA.detail}</p>
+											{analysisData.recommendations.rollAnalysis?.map((roll, idx) => {
+												// Normalize roll data to prevent crashes from missing ruleA/ruleB
+												const safeRuleA = roll?.ruleA ?? { triggered: false, threshold: null, current: null, detail: 'Not available' };
+												const safeRuleB = roll?.ruleB ?? { triggered: false, threshold: null, current: null, detail: 'Not available' };
+												
+												return (
+													<div key={idx} className="border rounded-lg p-4 bg-gray-50">
+														<div className="flex justify-between items-start mb-2">
+															<h4 className="font-semibold">{roll.position}</h4>
+															<span className={`px-2 py-1 rounded text-xs font-medium ${
+																roll.action === 'ROLL' ? 'bg-yellow-100 text-yellow-800' :
+																roll.action === 'HOLD' ? 'bg-green-100 text-green-800' :
+																'bg-gray-100 text-gray-800'
+															}`}>
+																{roll.action}
+															</span>
 														</div>
-														<div>
-															<p className="text-gray-600">Rule B (Delta ≥ 0.80)</p>
-															<p className={`font-medium ${roll.ruleB.triggered ? 'text-red-600' : 'text-green-600'}`}>
-																{roll.ruleB.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
-															</p>
-															<p className="text-xs text-gray-500">{roll.ruleB.detail}</p>
+														
+														<div className="grid grid-cols-2 gap-4 text-sm">
+															<div>
+																<p className="text-gray-600">Rule A (Price ≥ Strike × 1.08)</p>
+																<p className={`font-medium ${safeRuleA.triggered ? 'text-red-600' : 'text-green-600'}`}>
+																	{safeRuleA.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
+																</p>
+																<p className="text-xs text-gray-500">{safeRuleA.detail || 'Not available'}</p>
+															</div>
+															<div>
+																<p className="text-gray-600">Rule B (Delta ≥ 0.80)</p>
+																<p className={`font-medium ${safeRuleB.triggered ? 'text-red-600' : 'text-green-600'}`}>
+																	{safeRuleB.triggered ? '🔴 TRIGGERED' : '🟢 Not triggered'}
+																</p>
+																<p className="text-xs text-gray-500">{safeRuleB.detail || 'Not available'}</p>
+															</div>
 														</div>
-													</div>
 													
 													{roll.conditionalTrigger && (
 														<div className="mt-3 p-2 bg-yellow-50 rounded">
@@ -1380,7 +1572,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 														<p className="mt-2 text-sm text-gray-700">{roll.recommendation}</p>
 													)}
 												</div>
-											))}
+											);
+											})}
 										</CardContent>
 									</Card>
 
@@ -1560,90 +1753,306 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 
 						{/* Market Context Tab Content */}
 						<TabsContent value='market-context' className='space-y-4'>
-							<Card>
-								<CardHeader>
-									<CardTitle>
-										Key Technical Indicators
-									</CardTitle>
-								</CardHeader>
-								<CardContent>
-									<table className='w-full text-sm'>
-										<thead>
-											<tr className='border-b'>
-												<th className='text-left py-2'>
-													Indicator
-												</th>
-												<th className='text-left py-2'>
-													Value
-												</th>
-												<th className='text-left py-2'>
-													Interpretation
-												</th>
-												<th className='text-left py-2'>
-													Impact
-												</th>
-											</tr>
-										</thead>
-										<tbody>
-											{displayData.technicalFactors.map(
-												(tf, idx) => (
-													<tr
-														key={idx}
-														className='border-b last:border-0'>
-														<td className='py-2'>
-															{tf.factor}
-														</td>
+							{/* Show message for BOTH mode */}
+							{tickerSymbol?.includes(',') && (
+								<Card>
+									<CardContent className="py-8 text-center">
+										<p className="text-gray-500">Market Context is not available for combined analysis.</p>
+										<p className="text-sm text-gray-400 mt-2">Please select IBIT or ETHA individually for market context.</p>
+									</CardContent>
+								</Card>
+							)}
+							
+							{/* Loading state */}
+							{!tickerSymbol?.includes(',') && marketContextLoading && (
+								<Card>
+									<CardContent className="py-8 text-center">
+										<p className="text-gray-500">Loading market context...</p>
+									</CardContent>
+								</Card>
+							)}
+							
+							{/* Market data loaded */}
+							{!tickerSymbol?.includes(',') && !marketContextLoading && marketContextData && (
+								<>
+							{/* Overall Market Sentiment */}
+							{marketContextData?.overallSentiment && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Market Sentiment Overview</CardTitle>
+									</CardHeader>
+									<CardContent>
+										<div className="space-y-2">
+											<p className="text-sm">{marketContextData.overallSentiment.summary}</p>
+											<div className="flex justify-between items-center mt-2">
+												<span className="text-xs text-gray-500">Confidence: {marketContextData.overallSentiment.confidence}</span>
+												<span className="text-sm font-medium text-blue-600">{marketContextData.overallSentiment.recommendation}</span>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* ETF Flows (for crypto assets) */}
+							{(tickerSymbol === 'IBIT' || tickerSymbol === 'ETHA') && (
+								<Card>
+									<CardHeader>
+										<CardTitle>ETF Flow Analysis</CardTitle>
+										<CardDescription>Net inflows/outflows and impact on spot price</CardDescription>
+									</CardHeader>
+									<CardContent>
+										{etfFlowsLoading ? (
+											<div className="text-sm text-gray-500">Loading flow data...</div>
+										) : (
+											<div className="grid grid-cols-2 gap-4">
+												<div>
+													<p className="text-xs text-gray-500">Net Flows</p>
+													<p className="font-medium">{etfFlowsData?.netFlows || marketContextData?.etfFlows?.netFlows || 'Live data not available'}</p>
+												</div>
+												<div>
+													<p className="text-xs text-gray-500">Trend</p>
+													<p className="font-medium">{etfFlowsData?.trend || marketContextData?.etfFlows?.trend || 'Live data not available'}</p>
+												</div>
+												<div className="col-span-2">
+													<p className="text-xs text-gray-500">Impact</p>
+													<p className="text-sm">{etfFlowsData?.impact || marketContextData?.etfFlows?.impact || 'Live data not available'}</p>
+												</div>
+												<div className="col-span-2">
+													<p className="text-xs text-gray-500">Recommendation</p>
+													<p className="text-sm font-medium text-blue-600">{etfFlowsData?.recommendation || marketContextData?.etfFlows?.recommendation || 'Hold or size conservatively until clear flow trends emerge'}</p>
+												</div>
+												{/* Always show Source and As Of */}
+												{(etfFlowsData?.source || marketContextData?.etfFlows?.source) && (
+													<div className="col-span-2 mt-2 pt-2 border-t">
+														<p className="text-xs text-gray-400">
+															As of {etfFlowsData?.source?.asOf || marketContextData?.etfFlows?.source?.asOf} • 
+															<a href={etfFlowsData?.source?.url || marketContextData?.etfFlows?.source?.url} 
+															   target="_blank" 
+															   rel="noopener noreferrer"
+															   className="text-blue-500 hover:underline">
+																Source
+															</a>
+														</p>
+													</div>
+												)}
+											</div>
+										)}
+									</CardContent>
+								</Card>
+							)}
+
+							{/* NAV Analysis (for ETFs) */}
+							{marketContextData?.navAnalysis && (tickerSymbol === 'IBIT' || tickerSymbol === 'ETH' || tickerSymbol === 'ETHA') && (
+								<Card>
+									<CardHeader>
+										<CardTitle>NAV Premium/Discount</CardTitle>
+										<CardDescription>Trading relative to net asset value</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="space-y-4">
+											{/* Single Signed NAV Metric */}
+											<div className="flex items-center justify-between">
+												<div>
+													<p className="text-xs text-gray-500 mb-1">Current Status</p>
+													{(() => {
+														const premium = marketContextData.navAnalysis.premium;
+														const discount = marketContextData.navAnalysis.discount;
+
+														if (!premium && !discount) {
+															return <p className="text-lg font-medium text-gray-500">Live data not available</p>;
+														}
+
+														// Parse the percentage value
+														const value = premium || discount;
+														const numValue = parseFloat(value?.replace('%', '') || '0');
+														const isDiscount = !!discount;
+
+														// Determine color based on value
+														const colorClass = Math.abs(numValue) < 0.1 ? 'text-gray-600' :
+																		   isDiscount ? 'text-green-600' : 'text-amber-600';
+
+														// Determine icon
+														const icon = Math.abs(numValue) < 0.1 ? '→' :
+																	isDiscount ? '↓' : '↑';
+
+														return (
+															<div className="flex items-center gap-2">
+																<span className={`text-2xl font-bold ${colorClass}`}>
+																	{isDiscount ? '-' : '+'}{value}
+																</span>
+																<span className={`text-2xl ${colorClass}`}>{icon}</span>
+															</div>
+														);
+													})()}
+												</div>
+											</div>
+
+											<div>
+												<p className="text-xs text-gray-500">Interpretation</p>
+												<p className="text-sm">{marketContextData.navAnalysis.interpretation || 'Live data not available'}</p>
+											</div>
+
+											<div>
+												<p className="text-xs text-gray-500">Trading Opportunity</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.navAnalysis.tradingOpportunity || 'Live data not available'}</p>
+											</div>
+
+											{marketContextData.navAnalysis.source?.url && (
+												<div className="mt-2 pt-2 border-t">
+													<p className="text-xs text-gray-400">
+														As of {marketContextData.navAnalysis.source.asOf} •
+														<a href={marketContextData.navAnalysis.source.url}
+														   target="_blank"
+														   rel="noopener noreferrer"
+														   className="text-blue-500 hover:underline">
+															Source
+														</a>
+													</p>
+												</div>
+											)}
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Volatility Metrics */}
+							{marketContextData?.volatilityMetrics && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Volatility Analysis</CardTitle>
+										<CardDescription>Implied volatility and premium environment</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<p className="text-xs text-gray-500">Current IV</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.currentIV}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">IV Rank</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.ivRank}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Call/Put Skew</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.callPutSkew}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Premium Environment</p>
+												<p className="font-medium">{marketContextData.volatilityMetrics.premiumEnvironment}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Wheel Strategy Impact</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.volatilityMetrics.wheelStrategy}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Options Flow */}
+							{marketContextData?.optionsFlow && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Options Flow & Positioning</CardTitle>
+										<CardDescription>Large trader activity and sentiment</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<p className="text-xs text-gray-500">Large Orders</p>
+												<p className="text-sm">{marketContextData.optionsFlow.largeOrders}</p>
+											</div>
+											<div>
+												<p className="text-xs text-gray-500">Put/Call Ratio</p>
+												<p className="text-sm">{marketContextData.optionsFlow.putCallRatio}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Open Interest</p>
+												<p className="text-sm">{marketContextData.optionsFlow.openInterest}</p>
+											</div>
+											<div className="col-span-2">
+												<p className="text-xs text-gray-500">Market Sentiment</p>
+												<p className="text-sm font-medium text-blue-600">{marketContextData.optionsFlow.sentiment}</p>
+											</div>
+										</div>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Upcoming Catalysts */}
+							{marketContextData?.upcomingCatalysts && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Upcoming Catalysts</CardTitle>
+										<CardDescription>Events that may impact volatility and premiums</CardDescription>
+									</CardHeader>
+									<CardContent>
+										{typeof marketContextData.upcomingCatalysts === 'string' ? (
+											<p className="text-sm text-gray-600">
+												{marketContextData.upcomingCatalysts}
+											</p>
+										) : (
+											<div className="space-y-3">
+												{marketContextData.upcomingCatalysts.map((catalyst, idx) => (
+													<div key={idx} className="border-l-2 border-blue-500 pl-3">
+														<div className="flex justify-between items-start">
+															<div>
+																<p className="font-medium text-sm">{catalyst.event}</p>
+																<p className="text-xs text-gray-500">Date: {catalyst.date}</p>
+																<p className="text-xs text-gray-500">Impact: {catalyst.impact}</p>
+															</div>
+														</div>
+														<p className="text-sm mt-1">{catalyst.preparation}</p>
+														{catalyst.source?.url && (
+															<p className="text-xs text-gray-400 mt-1">
+																Source: <a href={catalyst.source.url} 
+																	target="_blank" 
+																	rel="noopener noreferrer"
+																	className="text-blue-500 hover:underline">
+																	{catalyst.source.url.replace(/^https?:\/\//, '').split('/')[0]}
+																</a>
+															</p>
+														)}
+													</div>
+												))}
+											</div>
+										)}
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Legacy Technical Indicators (keep for compatibility) */}
+							{displayData.technicalFactors.length > 0 && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Technical Indicators</CardTitle>
+									</CardHeader>
+									<CardContent>
+										<table className='w-full text-sm'>
+											<thead>
+												<tr className='border-b'>
+													<th className='text-left py-2'>Indicator</th>
+													<th className='text-left py-2'>Value</th>
+													<th className='text-left py-2'>Interpretation</th>
+													<th className='text-left py-2'>Impact</th>
+												</tr>
+											</thead>
+											<tbody>
+												{displayData.technicalFactors.map((tf, idx) => (
+													<tr key={idx} className='border-b last:border-0'>
+														<td className='py-2'>{tf.factor}</td>
 														<td>{tf.value}</td>
-														<td>
-															{tf.interpretation}
-														</td>
+														<td>{tf.interpretation}</td>
 														<td>{tf.impact}</td>
 													</tr>
-												)
-											)}
-											{/* ---------- Added: visual S/R levels ---------- */}
-											{analysisData?.chartMetrics?.[0]
-												?.keyLevels?.length ? (
-												analysisData.chartMetrics[0].keyLevels.map(
-													(lvl, idx) => (
-														<tr key={idx}>
-															{/* Added: label shows Support / Resistance */}
-															<td className='py-1'>
-																{lvl.type}
-															</td>
-															{/* Added: numeric price formatted to 2 decimals */}
-															<td>
-																{lvl.price.toFixed(
-																	2
-																)}
-																{/* Optional: strength badge */}
-																<span className='ml-2 text-xs opacity-70'>
-																	{
-																		lvl.strength
-																	}
-																</span>
-															</td>
-															{/* Keep empty cells to preserve table structure */}
-															<td></td>
-															<td></td>
-														</tr>
-													)
-												)
-											) : (
-												<tr>
-													<td className='py-1'>
-														Key levels
-													</td>
-													<td>None</td>
-													<td></td>
-													<td></td>
-												</tr>
-											)}
-										</tbody>
-									</table>
-								</CardContent>
-							</Card>
-							{/* Add S/R Levels Card (using displayData.keyLevels) and Candlestick Card here later */}
+												))}
+											</tbody>
+										</table>
+									</CardContent>
+								</Card>
+							)}
+								</>
+							)}
 						</TabsContent>
 
 						{/* Strategy Tab Content */}
@@ -1805,4 +2214,3 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		</div>
 	);
 }
-

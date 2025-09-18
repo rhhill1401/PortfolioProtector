@@ -4,6 +4,8 @@ import {useState} from 'react';
 // Import the new component placeholder (we'll create it next)
 import {StockAnalysis} from './components/StockAnalysis';
 import {PolygonTester} from './components/PolygonTester';
+import {TestWebSearch} from './components/TestWebSearch';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
 	// The currently selected/entered ticker symbol
@@ -11,6 +13,7 @@ function App() {
 	
 	// Check if we're in test mode via URL param
 	const isTestMode = window.location.search.includes('test=polygon');
+	const isWebSearchTest = window.location.search.includes('test=websearch');
 
 	return (
 		<div className='flex flex-col min-h-screen w-screen bg-white text-gray-900 overflow-x-hidden'>
@@ -34,20 +37,26 @@ function App() {
 			</header>
 
 			<main className='flex-grow w-full py-8'>
-				{isTestMode ? (
+				{isWebSearchTest ? (
+					<TestWebSearch />
+				) : isTestMode ? (
 					<PolygonTester />
 				) : (
 					<div className='container mx-auto px-4 flex flex-col md:flex-row gap-6 h-full'>
-						<div className='md:w-1/3 w-full'>
-							<TickerPriceSearch
-								tickerSymbol={activeTicker}
-								onTickerChange={setActiveTicker}
-							/>
-						</div>
-						<div className='md:w-2/3 w-full rounded-lg'>
-							{activeTicker ? (
-								<StockAnalysis tickerSymbol={activeTicker} />
-							) : (
+                    <div className='md:w-1/3 w-full'>
+                        <ErrorBoundary title="Ticker panel error">
+                            <TickerPriceSearch
+                                tickerSymbol={activeTicker}
+                                onTickerChange={setActiveTicker}
+                            />
+                        </ErrorBoundary>
+                    </div>
+                    <div className='md:w-2/3 w-full rounded-lg'>
+                        {activeTicker ? (
+                            <ErrorBoundary title="Analysis panel error">
+                                <StockAnalysis tickerSymbol={activeTicker} />
+                            </ErrorBoundary>
+                        ) : (
 								<div className='p-6 bg-[#F3F4F6] rounded-lg shadow-md border border-gray-200 min-h-[28rem] md:min-h-full h-full flex items-center justify-center text-center text-gray-500'>
 									<div>
 										<h2 className='text-xl font-semibold mb-2'>

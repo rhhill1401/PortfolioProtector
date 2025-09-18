@@ -121,8 +121,8 @@ Deno.serve(async (req) => {
 
       const option = data.results[0];
       
-      // Log raw response for debugging
-      console.log('Raw Polygon response:', JSON.stringify(option, null, 2));
+      // Log raw response for debugging (ensure structure visibility for Greeks)
+      console.log('RAW_POLYGON_RESPONSE:', JSON.stringify(option, null, 2));
       
       // Calculate days to expiration
       const today = new Date();
@@ -147,6 +147,17 @@ Deno.serve(async (req) => {
         console.log(`Using day close as mid: ${mid} (bid/ask requires higher tier Polygon plan)`);
       }
       
+      // Log extracted greeks/implied volatility before building response
+      console.log('EXTRACTED_GREEKS:', {
+        delta: option.greeks?.delta,
+        theta: option.greeks?.theta,
+        gamma: option.greeks?.gamma,
+        vega: option.greeks?.vega,
+        implied_volatility: option.implied_volatility,
+        raw_greeks: option.greeks,
+        raw_option: option,
+      });
+
       // Build response
       const quoteData = {
         success: true,

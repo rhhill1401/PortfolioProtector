@@ -24,17 +24,32 @@ npm run preview   # Preview production build locally
 
 ## CRITICAL: Code Review Process
 
-**ALWAYS run these steps when reviewing or modifying code:**
-1. **Run `npm run lint` IMMEDIATELY after any code changes** - This catches unused variables and other issues
-2. **Check ESLint output** - Fix all errors (red) before considering the code complete
-3. **Address warnings** - Review yellow warnings for potential issues
-4. **Never rely on manual review alone** - Always use automated tools first
+**MANDATORY AFTER EVERY CODE CHANGE:**
+1. **Run `npm run lint:eslint` IMMEDIATELY** - This is NOT optional (use this instead of `npm run lint` if Deno is not available)
+2. **Fix ALL errors (red)** - Code is not complete until errors are fixed
+3. **Review ALL warnings (yellow)** - Address or document why they're acceptable
+4. **Check specifically for:**
+   - Unused variables (e.g., `'highPrice' is assigned a value but never used`)
+   - Complexity warnings (functions over 30 need refactoring)
+   - Type safety issues (`any` types should be avoided)
+   - Nested blocks too deep
+5. **Never skip linting** - It catches issues that manual review misses
 
-### Common Issues ESLint Catches:
-- Unused variables (e.g., `'highPrice' is assigned a value but never used`)
-- Type safety issues
-- Complexity warnings
-- Code style violations
+### Lint Commands for AI Agents:
+```bash
+# Use these if Deno is not installed:
+npm run lint:eslint  # Run ESLint only (catches unused variables, complexity, etc.)
+npm run lint:tsc     # Run TypeScript check only
+
+# Full lint (requires Deno):
+npm run lint         # Runs everything including Deno checks
+```
+
+### Why This Matters:
+- ESLint catches real bugs before they reach production
+- Complexity warnings indicate code that's hard to maintain
+- Unused variables are dead code that confuses future developers
+- Type issues can cause runtime errors
 
 ## Architecture Overview
 
@@ -256,6 +271,37 @@ Without `deno.json`, the bundler will hang during deployment
 ❌ Not Implemented (Optional Phase 6):
 - Options Greeks chart showing assignment probabilities
 - Wheel Execution, Assignment Success, Continuation Plan tab content
+
+## Testing Edge Functions
+
+### Portfolio-Vision Testing
+**ALWAYS USE THIS STANDARD TEST** when testing portfolio-vision edge function:
+```bash
+# Test with ETHA ticker (default)
+node tests/edge-functions/test-portfolio-vision.cjs
+
+# Test with specific ticker
+node tests/edge-functions/test-portfolio-vision.cjs IBIT
+```
+
+**Test Script Details:**
+- Location: `tests/edge-functions/test-portfolio-vision.cjs`
+- Automatically reads the **latest PNG** from `/Users/Killmunger/Documents/examples-portfolio/`
+- Reads credentials from `.env.local`
+- Saves output to `tests/outputs/portfolio-vision-[ticker]-[timestamp].json`
+- Shows detailed extraction results and contract sign interpretation
+
+**Important Contract Sign Understanding:**
+- **Negative contracts** (e.g., -5) = SOLD/SHORT positions (you wrote/sold the option)
+- **Positive contracts** (e.g., 5) = BOUGHT/LONG positions (you purchased the option)
+- The "M" suffix in brokerage screenshots (e.g., "5 M") is just a display marker
+- The AI correctly interprets "5 M" as -5 for sold positions
+
+**When to Use This Test:**
+- After deploying portfolio-vision edge function changes
+- When debugging option position extraction issues
+- To verify the AI is correctly reading portfolio screenshots
+- Before running integrated-analysis tests that depend on portfolio data
 
 ## Testing Principles
 - When performing integrated tests, use real data. Do not hardcode data. So if you're running an end-to-end test, it should be with real data. For example, if you had to upload an image, you should upload a real image, run all the APIs and tests with that data and then show the results. Don't hardcode in data.

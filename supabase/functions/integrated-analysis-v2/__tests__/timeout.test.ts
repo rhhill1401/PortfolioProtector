@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "https://deno.land/std@0.224.0/testi
 import { runWithTimeout } from "../index.ts";
 
 Deno.test("runWithTimeout resolves when task finishes in time", async () => {
-  const result = await runWithTimeout(50, async (_signal) => {
+  const result = await runWithTimeout(50, async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     return 42;
   });

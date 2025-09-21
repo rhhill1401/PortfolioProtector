@@ -22,6 +22,41 @@ import {
   type WheelStrategyResult,
 } from "./strategies.ts";
 
+interface MarketDataSummary {
+  etfFlows?: Record<string, unknown>;
+  navData?: Record<string, unknown>;
+  volatility?: Record<string, unknown>;
+  optionsFlow?: Record<string, unknown>;
+  upcomingEvents?: unknown[];
+  nextFedMeeting?: string;
+  tripleWitching?: string;
+  confidence?: string;
+  [key: string]: unknown;
+}
+
+interface RequestPayload {
+  ticker?: string;
+  portfolio?: PortfolioData;
+  chartMetrics?: ChartMetric[];
+  priceContext?: PriceContext;
+  optionGreeks?: Record<string, OptionQuote>;
+  marketData?: MarketDataSummary;
+  research?: unknown[];
+  charts?: unknown[];
+}
+
+const getSourceDetails = (value: unknown, fallbackDate: string) => {
+  if (value && typeof value === 'object') {
+    const sourceRecord = value as { url?: unknown; asOf?: unknown };
+    const url = typeof sourceRecord.url === 'string' ? sourceRecord.url : '';
+    const asOf = typeof sourceRecord.asOf === 'string' ? sourceRecord.asOf : fallbackDate;
+    if (url || asOf) {
+      return { url, asOf };
+    }
+  }
+  return undefined;
+};
+
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-5";
 
@@ -85,7 +120,8 @@ async function callOpenAI(OPENAI_API_KEY: string, OPENAI_MODEL: string, prompt: 
       (timeoutError as Error & { cause?: unknown }).cause = err;
       throw timeoutError;
     }
-    console.error('💥 [AI CALL] Fetch failed before completion', { durationMs: duration, error: err?.message ?? String(err) });
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.error('💥 [AI CALL] Fetch failed before completion', { durationMs: duration, error: errorMessage });
     throw err;
   }
 
@@ -137,29 +173,23 @@ Deno.serve(async (req) => {
 
   /* ---------- Validate body ---------- */
 
-  let body:
-    | {
-        ticker?: string;
-        portfolio?: PortfolioData;
-        charts?: unknown[];
-        chartMetrics?: ChartMetric[];
-        priceContext?: PriceContext;
-        research?: unknown[];
-        optionGreeks?: Record<string, OptionQuote>;
-      }
-    | undefined;
+  let body: RequestPayload | undefined;
   try {
     body = await req.json();
   } catch {
     return json({ success: false, error: "Invalid JSON body" }, 400);
   }
 
-  const { ticker,
-          portfolio,
-          chartMetrics = [],
-          priceContext,
-          optionGreeks: optionGreeksRaw = {},
-          marketData = {} } = body ?? {};
+  const {
+    ticker,
+    portfolio,
+    chartMetrics = [],
+    priceContext,
+    optionGreeks: optionGreeksRaw = {},
+    marketData: marketDataRaw = {},
+  } = body ?? {};
+
+  const marketData: MarketDataSummary = marketDataRaw ?? {};
 
   const optionGreeks: Record<string, OptionQuote> = optionGreeksRaw as Record<string, OptionQuote>;
 
@@ -195,8 +225,9 @@ Deno.serve(async (req) => {
     // Filter option positions to only the requested ticker
     if (portfolio.metadata?.optionPositions) {
       const originalOptCount = portfolio.metadata.optionPositions.length;
-      portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.filter(opt => {
-        const symbol = (opt.symbol || '').toUpperCase();
+      portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.filter((opt) => {
+        const rawSymbol = typeof opt.symbol === 'string' ? opt.symbol : '';
+        const symbol = rawSymbol.toUpperCase();
         const tickerUpper = ticker.toUpperCase();
         // Match exact ticker or ticker with space (like "IBIT 63 Call")
         return symbol === tickerUpper || symbol.startsWith(tickerUpper + ' ');
@@ -276,23 +307,29 @@ Deno.serve(async (req) => {
   console.log(`🎯 [TOKEN LIMIT] Trimming ${currentOptionPositions.length} positions to ${trimmedPositions.length} for prompt`);
   
   const buildFallbackAnalysis = (warning: string) => {
-    const fallbackPositions = trimmedPositions.map((position) => ({
-      symbol: position.symbol || ticker,
-      strike: position.strike || 0,
-      expiry: position.expiry || 'Unknown',
-      type: position.optionType || 'CALL',
-      contracts: position.contracts || 0,
-      premium: position.premiumCollected || 0,
-      currentValue: position.currentValue || 0,
-      profitLoss: position.profitLoss || 0,
-      markPnl: position.markPnl || 0,
-      wheelPnl: position.wheelPnl || 0,
-      delta: position.delta,
-      gamma: position.gamma,
-      theta: position.theta,
-      vega: position.vega,
-      iv: position.iv,
-    }));
+    const fallbackPositions = trimmedPositions.map((position) => {
+      const premiumCollected = position.premiumCollected ?? position.premium ?? 0;
+      return {
+        symbol: position.symbol || ticker,
+        strike: position.strike ?? 0,
+        expiry: position.expiry || 'Unknown',
+        optionType: position.optionType || 'CALL',
+        contracts: position.contracts ?? 0,
+        premium: premiumCollected,
+        premiumCollected,
+        currentValue: position.currentValue ?? 0,
+        profitLoss: position.profitLoss ?? 0,
+        markPnl: position.markPnl ?? 0,
+        wheelPnl: position.wheelPnl ?? 0,
+        wheelNet: position.wheelNet ?? position.wheelPnl ?? 0,
+        delta: position.delta,
+        gamma: position.gamma,
+        theta: position.theta,
+        vega: position.vega,
+        iv: position.iv,
+        daysToExpiry: position.daysToExpiry ?? null,
+      };
+    });
 
     const defaultRecommendation = [
       { name: hasPosition ? 'Sell Calls' as const : 'Sell Puts' as const, value: 5 },
@@ -306,14 +343,14 @@ Deno.serve(async (req) => {
         trend: String(isCryptoETF ? (etfFlows.trend ?? 'No data') : 'N/A'),
         impact: String(isCryptoETF ? (etfFlows.impact ?? 'No data') : 'N/A'),
         recommendation: String(isCryptoETF ? (etfFlows.recommendation ?? 'Monitor flows for impact') : 'Focus on technical levels'),
-        source: etfFlows.source ? { url: etfFlows.source.url ?? '', asOf: etfFlows.source.asOf ?? currentDate } : undefined,
+        source: getSourceDetails(etfFlows.source, currentDate),
       },
       navAnalysis: {
         premium: String(isCryptoETF ? (navData.premium ?? 'No NAV data') : 'N/A'),
         discount: String(isCryptoETF ? (navData.discount ?? 'No NAV data') : 'N/A'),
         interpretation: String(isCryptoETF ? (navData.interpretation ?? 'NAV data unavailable') : 'N/A'),
         tradingOpportunity: String(isCryptoETF ? (navData.tradingOpportunity ?? 'Monitor for NAV updates') : 'N/A'),
-        source: navData.source ? { url: navData.source.url ?? '', asOf: navData.source.asOf ?? currentDate } : undefined,
+        source: getSourceDetails(navData.source, currentDate),
       },
       volatilityMetrics: {
         currentIV: String(currentIV),
@@ -455,16 +492,16 @@ Deno.serve(async (req) => {
 
   // 📊 PREPARE MARKET DATA FOR ANALYSIS
   // Extract real market data from marketData object (passed from frontend)
-  const etfFlows = marketData.etfFlows || {};
-  const navData = marketData.navData || {};
-  const volatilityData = marketData.volatility || {};
-  const optionsFlowData = marketData.optionsFlow || {};
-  const upcomingEvents = marketData.upcomingEvents || [];
+  const etfFlows = (marketData.etfFlows ?? {}) as Record<string, unknown>;
+  const navData = (marketData.navData ?? {}) as Record<string, unknown>;
+  const volatilityData = (marketData.volatility ?? {}) as Record<string, unknown>;
+  const optionsFlowData = (marketData.optionsFlow ?? {}) as Record<string, unknown>;
+  const upcomingEvents = Array.isArray(marketData.upcomingEvents) ? marketData.upcomingEvents : [];
   
   // Calculate key market metrics
   const currentDate = new Date().toISOString().split('T')[0];
-  const nextFedMeeting = marketData.nextFedMeeting || "2025-01-29"; // FOMC Jan 28-29, 2025
-  const tripleWitching = marketData.tripleWitching || "2025-12-19"; // Dec 19, 2025
+  const nextFedMeeting = typeof marketData.nextFedMeeting === 'string' ? marketData.nextFedMeeting : "2025-01-29"; // FOMC Jan 28-29, 2025
+  const tripleWitching = typeof marketData.tripleWitching === 'string' ? marketData.tripleWitching : "2025-12-19"; // Dec 19, 2025
   
   // Get actual IV from Greeks or estimate
   const currentIV = currentOptionPositions.length > 0 && currentOptionPositions[0].iv 
@@ -665,7 +702,7 @@ Return this JSON structure:
     ],
     "overallSentiment": {
       "summary": "Based on ${currentIV} IV, ${isCryptoETF ? 'ETF flows, ' : ''}and upcoming ${nextFedMeeting} Fed meeting, market conditions ${Number(currentIV) > 50 ? 'favor aggressive premium selling' : 'suggest standard wheel approach'}",
-      "confidence": "${marketData.confidence || 'Medium'}",
+      "confidence": "${typeof marketData.confidence === 'string' ? marketData.confidence : 'Medium'}",
       "recommendation": "Continue wheel strategy with ${Number(currentIV) > 50 ? 'wider strikes for safety' : 'standard strike selection'}"
     }
   },
@@ -950,7 +987,8 @@ Return this JSON structure:
         
     } catch (err) {
       console.error("Failed to parse AI response as JSON");
-      console.error("Parse error:", err.message);
+      const parseErrorMessage = err instanceof Error ? err.message : String(err);
+      console.error("Parse error:", parseErrorMessage);
       console.error("Text length:", txt.length);
       console.error("First 200 chars:", txt.substring(0, 200));
       console.error("Last 200 chars:", txt.substring(txt.length - 200));
@@ -964,7 +1002,8 @@ Return this JSON structure:
           analysis = JSON.parse(txt);
           console.log("Successfully parsed after fixing trailing commas");
         } catch (err2) {
-          console.error("Still failed after comma fix:", err2.message);
+          const fixErrorMessage = err2 instanceof Error ? err2.message : String(err2);
+          console.error("Still failed after comma fix:", fixErrorMessage);
           throw new Error("Invalid JSON response from AI - response too long or malformed");
         }
       } else {

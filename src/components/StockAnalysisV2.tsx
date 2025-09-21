@@ -13,12 +13,20 @@ import { useOptionChain } from '@/hooks/useOptionChain';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
 import { useMarketContext } from '@/hooks/useMarketContext';
 import { useEtfFlows } from '@/hooks/useEtfFlows';
-import { 
+import {
 	compounding,
 	estimateAssignmentProb
 } from '@/services/wheelMath';
 import { calculateAggregateMetrics } from '@/services/optionLookup';
 import { groupPositionsByTimeframe, formatExpiryLabel } from '@/services/wheelTimeAnalysis';
+
+// Import our new modular card components
+import {
+  OptionPositionCard,
+  PositionStatusCard,
+  IVEnvironmentCard,
+  AssignmentRiskCard
+} from '@/components/cards';
 
 interface StockAnalysisProps {
 	tickerSymbol: string;
@@ -169,7 +177,7 @@ interface WheelPosition {
     symbol?: string;
     strike: number;
     expiry: string;
-    type?: 'CALL' | 'PUT' | 'Call' | 'Put';
+    type: 'CALL' | 'PUT';
     optionType?: 'CALL' | 'PUT';
     contracts: number;
     status: string;
@@ -321,20 +329,6 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
 
-	// UI formatting helpers for Greeks
-	const fmtNoLeadZero = (v: number | null | undefined, decimals = 2): string => {
-		if (v === null || v === undefined || Number.isNaN(v)) return 'N/A';
-		return Math.abs(v).toFixed(decimals).replace(/^0(?=\.)/, '.');
-	};
-
-	const fmtIV = (iv: number | null | undefined): string => {
-		if (iv === null || iv === undefined || Number.isNaN(iv)) return 'N/A';
-		const val = Math.abs(iv);
-		const pct = val > 1.5 ? val : val * 100; // handle percent vs fraction inputs
-		return `${pct.toFixed(2)}%`;
-	};
-
-	const fmtTheta = (theta: number | null | undefined): string => fmtNoLeadZero(theta, 2);
 	
 	const { data: optionChainData } = useOptionChain(tickerSymbol);
 	
@@ -399,7 +393,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
                 symbol: pos.symbol ?? tickerSymbol,
                 strike: pos.strike,
                 expiry: parseExpiry(pos.expiry),
-                type: (pos.optionType || pos.type || 'CALL') as 'CALL' | 'PUT',
+                type: ((pos.optionType || pos.type || 'CALL').toUpperCase() === 'CALL' ? 'CALL' : 'PUT') as 'CALL' | 'PUT',
                 contracts: pos.contracts,
                 // Include both possible premium field names
                 premium: pos.premium,
@@ -521,9 +515,9 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			// Normalize the data structure - handle both wheelAnalysis and wheelStrategy
         const normalizedData = {
             ...(e.detail as any),
-            wheelStrategy: (e.detail as any).wheelAnalysis || (e.detail as any).wheelStrategy
+            wheelStrategy: (e.detail as any).wheelAnalysis || e.detail.wheelStrategy
         } as StockAnalysisData;
-
+			
 			// Add error handling before setting state
 			try {
 				console.log('📊 [STOCK ANALYSIS] About to set analysis data:', normalizedData);
@@ -688,174 +682,19 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 					{/* Status Cards Row - Moved above tabs */}
 					{analysisData?.wheelStrategy && (
 						<div className='grid grid-cols-1 md:grid-cols-3 gap-4 mb-6'>
-							{/* Position Status Card - Updated design */}
-							<div className='bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200'>
-								<div className='flex items-start justify-between'>
-									<div className='flex-1'>
-										<div className='flex items-center gap-2 mb-2'>
-											<svg className='w-5 h-5 text-blue-600' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-												<path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} 
-													d='M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' 
-												/>
-											</svg>
-											<p className='text-sm font-medium text-gray-600'>Position Status</p>
-										</div>
-										<p className='text-lg font-bold text-gray-900'>
-											{(analysisData.wheelStrategy?.shareCount || 0).toLocaleString()} shares
-											{(() => {
-												const positions = analysisData.wheelStrategy?.currentPositions || [];
-												
-												// Debug logging
-												console.log('🔍 [POSITION STATUS DEBUG] Raw positions:', positions);
-												
-												// Add term field if missing (fallback for undeployed edge function)
-												const positionsWithTerm = positions.map(pos => {
-													// Calculate days to expiry if missing
-													let daysToExpiry = pos.daysToExpiry;
-													if (!daysToExpiry && pos.expiry) {
-														const today = new Date();
-														const expiryDate = new Date(pos.expiry);
-														daysToExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
-													}
-													
-													return {
-														...pos,
-														daysToExpiry,
-														term: pos.term || (daysToExpiry > 365 ? 'LONG_DATED' : 'SHORT_DATED')
-													};
-												});
-												
-												// Categorize positions by direction (SHORT/LONG) and term
-												const soldPositions = positionsWithTerm.filter(pos => pos.contracts < 0);
-												const boughtPositions = positionsWithTerm.filter(pos => pos.contracts > 0);
-												
-												console.log('🔍 [POSITION STATUS DEBUG] Sold positions:', soldPositions.length, 'Bought positions:', boughtPositions.length);
-												
-												// Count sold positions by term
-												const soldShortDated = soldPositions.filter(pos => pos.term === 'SHORT_DATED')
-													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-												const soldLongDated = soldPositions.filter(pos => pos.term === 'LONG_DATED')
-													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-												
-												// Count bought positions by term (if any)
-												const boughtShortDated = boughtPositions.filter(pos => pos.term === 'SHORT_DATED')
-													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-												const boughtLongDated = boughtPositions.filter(pos => pos.term === 'LONG_DATED')
-													.reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-												
-												const totalSold = soldShortDated + soldLongDated;
-												const totalBought = boughtShortDated + boughtLongDated;
-												
-												console.log('🔍 [POSITION STATUS DEBUG] Counts:', {
-													soldShortDated, soldLongDated, boughtShortDated, boughtLongDated,
-													totalSold, totalBought
-												});
-												
-												// Debug: log each position's term
-												console.log('🔍 [POSITION STATUS DEBUG] Position terms:', 
-													positionsWithTerm.map(p => ({
-														strike: p.strike,
-														daysToExpiry: p.daysToExpiry,
-														term: p.term,
-														contracts: p.contracts
-													}))
-												);
-												
-												const parts = [];
-												
-												// Display sold calls with term breakdown
-												if (totalSold > 0) {
-													let soldText = ` + ${totalSold} sold call${totalSold > 1 ? 's' : ''}`;
-													if (soldShortDated > 0 && soldLongDated > 0) {
-														soldText += ` (${soldShortDated} short-dated, ${soldLongDated} long-dated)`;
-													} else if (soldShortDated > 0) {
-														soldText += ' (short-dated)';
-													} else if (soldLongDated > 0) {
-														soldText += ' (long-dated)';
-													}
-													parts.push(soldText);
-												}
-												
-												// Display bought calls with term breakdown
-												if (totalBought > 0) {
-													let boughtText = ` + ${totalBought} bought call${totalBought > 1 ? 's' : ''}`;
-													if (boughtShortDated > 0 && boughtLongDated > 0) {
-														boughtText += ` (${boughtShortDated} short-dated, ${boughtLongDated} long-dated)`;
-													} else if (boughtShortDated > 0) {
-														boughtText += ' (short-dated)';
-													} else if (boughtLongDated > 0) {
-														boughtText += ' (long-dated)';
-													}
-													parts.push(boughtText);
-												}
-												
-												return <>{parts.join('')}</>;
-											})()}
-										</p>
-										<p className='text-sm text-blue-600 mt-1'>
-											Net positive carry
-										</p>
-										<div className='mt-3 pt-3 border-t border-blue-200'>
-											<p className='text-xs text-gray-600'>Total Premium Collected</p>
-											<p className='text-xl font-bold text-gray-900'>
-												${Math.round(analysisData.wheelStrategy.currentPositions?.reduce((total, pos) => {
-													// Premium values are already total collected per position, not per share
-													const premiumValue = pos.premium || pos.premiumCollected || 0;
-													return total + premiumValue;
-												}, 0)) || '0'}
-											</p>
-										</div>
-									</div>
-								</div>
-							</div>
+							{/* Use modular cards instead of inline JSX */}
+							<PositionStatusCard
+								shareCount={analysisData.wheelStrategy?.shareCount || 0}
+								positions={analysisData.wheelStrategy?.currentPositions || []}
+							/>
 
-							{/* IV Environment Card */}
-							<div className='bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-lg border border-green-200'>
-								<div className='flex items-start justify-between'>
-									<div>
-										<p className='text-sm font-medium text-gray-600'>IV Environment</p>
-										<p className='text-2xl font-bold text-green-700 mt-1'>
-											{(analysisData.vix || 0) > 20 ? 'High Vol' : (analysisData.vix || 0) > 15 ? 'Moderate' : 'Low Vol'}
-										</p>
-										<p className='text-xs text-gray-500 mt-1'>VIX: {analysisData.vix?.toFixed(2)}</p>
-									</div>
-									<span className='inline-flex items-center justify-center w-10 h-10 rounded-full bg-green-100 text-green-600'>
-										<svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-											<path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} 
-												d='M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z' 
-											/>
-										</svg>
-									</span>
-								</div>
-							</div>
+							<IVEnvironmentCard
+								vix={analysisData.vix}
+							/>
 
-							{/* Assignment Risk Card */}
-							<div className='bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-lg border border-purple-200'>
-								<div className='flex items-start justify-between'>
-									<div>
-										<p className='text-sm font-medium text-gray-600'>Assignment Risk</p>
-										<p className='text-2xl font-bold text-purple-700 mt-1'>
-											{analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb || '0%'}
-										</p>
-										<p className='text-xs text-gray-500 mt-1'>
-											{parseFloat(analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb || '0') > 50 
-												? 'Monitor closely' 
-												: 'Within normal range'}
-										</p>
-									</div>
-									<span className={`inline-flex items-center justify-center w-10 h-10 rounded-full ${
-										parseFloat(analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb || '0') > 50
-											? 'bg-yellow-100 text-yellow-600'
-											: 'bg-purple-100 text-purple-600'
-									}`}>
-										<svg className='w-6 h-6' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-											<path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} 
-												d='M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' 
-											/>
-										</svg>
-									</span>
-								</div>
-							</div>
+							<AssignmentRiskCard
+								assignmentProb={analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb}
+							/>
 						</div>
 					)}
 
@@ -911,127 +750,44 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							{analysisData?.wheelStrategy ? (
 								<>
 
-									{/* Current Positions - Single Column Layout */}
 									<Card className="w-full">
 										<CardHeader className="pb-3">
-											<CardTitle className="text-lg">Current {analysisData.wheelStrategy?.currentPhase === 'CASH_SECURED_PUT' ? 'Put' : 'Call'} Positions</CardTitle>
+											<CardTitle className="text-lg">Current Option Positions</CardTitle>
 										</CardHeader>
 										<CardContent>
-											{analysisData.wheelStrategy?.currentPositions?.map((position, idx) => {
-												// Calculate days to expiry from the expiry date
-												const today = new Date();
-												const expiryDate = new Date(position.expiry);
-												const daysToExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
-												
-												// Calculate term based on days to expiry
-												const term = position.term || (daysToExpiry > 365 ? 'LONG_DATED' : 'SHORT_DATED');
-												
-												// Determine position direction from original contract value
-												const positionDirection = position.contracts < 0 ? 'SHORT' : 'LONG';
-												
-												// Color based on assignment risk (current price vs strike)
-												const currentPrice = analysisData.summary?.currentPrice || 0;
-												const moneyness = ((currentPrice - position.strike) / position.strike) * 100;
-												
-												// For calls: ITM (in the money) = high risk, ATM (at the money) = medium risk, OTM (out of the money) = low risk
-												const bgColor = moneyness >= 0 ? 'bg-red-50 border-red-200' :      // ITM - high assignment risk
-												               moneyness >= -3 ? 'bg-yellow-50 border-yellow-200' : // Near the money - moderate risk
-												               'bg-green-50 border-green-200';                      // OTM - low assignment risk
-												
+											{(() => {
+												const positions = analysisData?.wheelStrategy?.currentPositions || [];
+												const currentPrice = analysisData?.summary?.currentPrice || priceInfo.price || 0;
+												const normalized = positions.map(p => ({
+													...p,
+													type: ((p.optionType || p.type || 'CALL').toString().toUpperCase() === 'CALL' ? 'CALL' : 'PUT') as 'CALL' | 'PUT'
+												}));
+												const soldCalls = normalized.filter(p => (p.contracts || 0) < 0 && p.type === 'CALL');
+												const boughtCalls = normalized.filter(p => (p.contracts || 0) > 0 && p.type === 'CALL');
+												const soldPuts = normalized.filter(p => (p.contracts || 0) < 0 && p.type === 'PUT');
+												const boughtPuts = normalized.filter(p => (p.contracts || 0) > 0 && p.type === 'PUT');
+												const renderGroup = (title: string, list: typeof normalized) => list.length > 0 ? (
+													<div className="mb-6">
+														<div className="font-semibold text-sm mb-2">{title}</div>
+														{list.map((p, idx) => (
+															<OptionPositionCard
+																key={`${p.symbol}-${p.type}-${p.strike}-${p.expiry}-${idx}`}
+																position={p}
+																currentPrice={currentPrice}
+															/>
+														))}
+													</div>
+												) : null;
 												return (
-													<div key={idx} className={`p-4 rounded-lg border ${bgColor} mb-3`}>
-														<div className="space-y-2">
-															<div className="flex justify-between items-center mb-2">
-																<span className="text-lg font-bold">
-																	${position.strike} {position.type || 'CALL'} {position.expiry} ({Math.abs(position.contracts)} contract{Math.abs(position.contracts) > 1 ? 's' : ''})
-																</span>
-																<div className="flex items-center gap-2">
-																	<span className={`text-xs px-2 py-1 rounded-full font-medium ${
-																		moneyness >= 0 ? 'bg-red-100 text-red-700' :
-																		moneyness >= -3 ? 'bg-yellow-100 text-yellow-700' :
-																		'bg-green-100 text-green-700'
-																	}`}>
-																		{moneyness >= 0 ? 'HIGH RISK' :
-																		 moneyness >= -3 ? 'MODERATE RISK' :
-																		 'LOW RISK'}
-																	</span>
-																	<span className="text-xs text-gray-500">
-																		{positionDirection === 'SHORT' ? 'SOLD' : 'BOUGHT'} {position.type || 'CALL'}
-																	</span>
-																</div>
-															</div>
-															<div className="text-sm text-gray-600 mb-2">
-																{daysToExpiry} days to expiry • {term === 'LONG_DATED' ? 'Long-dated' : 'Short-dated'}
-															</div>
-															<div className="grid grid-cols-2 gap-4 text-sm">
-																<div>
-																	<span className="text-gray-600">Premium: </span>
-																	<span className="font-semibold">${position.premium || position.premiumCollected}</span>
-																</div>
-																<div className="text-right">
-																	<span className="text-gray-600">Current: </span>
-																	<span className="font-semibold">${position.currentValue || 'N/A'}</span>
-																</div>
-																<div>
-																	<span className="text-gray-600">Wheel P&L: </span>
-																	<span className={`font-bold text-lg text-green-600`}>
-																		${Math.round(position.wheelPnl || position.wheelNet || 0).toLocaleString()}
-																	</span>
-																	<br />
-																	<span className="text-xs ${(position.markPnl || 0) < 0 ? 'text-red-500' : 'text-gray-400'}">
-																		Buy-to-close: ${Math.round(position.markPnl || position.optionMTM || 0).toLocaleString()}
-																	</span>
-																</div>
-															</div>
-															
-															{/* Greeks Display */}
-															<div className="grid grid-cols-2 gap-4 text-sm mt-3 pt-3 border-t">
-																<div>
-																	<span className="text-gray-600">Delta: </span>
-																	<span className="font-semibold">
-                  {position.delta !== null && position.delta !== undefined ? position.delta.toFixed(2) : 'N/A'}
-																	</span>
-																</div>
-																<div>
-																	<span className="text-gray-600">Theta: </span>
-																	<span className="font-semibold">
-																			{fmtTheta(position.theta)}
-																	</span>
-																</div>
-																<div>
-																	<span className="text-gray-600">Gamma: </span>
-																	<span className="font-semibold">
-																			{position.gamma !== null && position.gamma !== undefined ? fmtNoLeadZero(position.gamma, 2) : 'N/A'}
-																	</span>
-																</div>
-																<div>
-																	<span className="text-gray-600">IV: </span>
-																	<span className="font-semibold">
-																			{fmtIV(position.iv)}
-																	</span>
-																</div>
-															</div>
-															
-															{/* Assignment Probability based on Delta */}
-															{position.delta !== null && position.delta !== undefined && (
-																<div className="mt-3 pt-3 border-t">
-																	<span className="text-gray-600">Assignment Probability: </span>
-																	<span className={`font-bold ${
-																		Math.abs(position.delta) > 0.7 ? 'text-red-600' :
-																		Math.abs(position.delta) > 0.3 ? 'text-yellow-600' :
-																		'text-green-600'
-																	}`}>
-																		{(Math.abs(position.delta) * 100).toFixed(1)}%
-																	</span>
-																	<span className="text-xs text-gray-500 ml-2">
-																		(based on delta)
-																	</span>
-																</div>
-															)}
-														</div>
+													<div>
+														{renderGroup('SOLD CALLS', soldCalls)}
+														{renderGroup('BOUGHT CALLS', boughtCalls)}
+														{renderGroup('SOLD PUTS', soldPuts)}
+														{renderGroup('BOUGHT PUTS', boughtPuts)}
+														{normalized.length === 0 && <div className="text-gray-500 text-sm">No active option positions</div>}
 													</div>
 												);
-											})}
+											})()}
 										</CardContent>
 									</Card>
 								</>

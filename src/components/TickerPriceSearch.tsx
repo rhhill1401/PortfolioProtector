@@ -23,6 +23,132 @@ interface TickerPriceSearchProps {
 	onTickerChange: (v: string) => void;
 }
 
+// ===== Phase-1: client-only "Eyes" path (no edge) =====
+const USE_LOCAL_EYES = true; // flip ON for Phase-1
+
+// Type for raw option position from portfolio
+interface RawOptionPosition {
+  symbol?: string;
+  optionType?: string;
+  type?: string;
+  strike?: number | string;
+  expiry?: string;
+  contracts?: number | string;
+  premium?: number | string;
+  premiumCollected?: number | string;
+  currentValue?: number | string | null;
+}
+
+const toYYYYMMDD = (s?: string): string => {
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^([A-Za-z]{3})-(\d{1,2})-(\d{4})$/);
+  const mm: Record<string,string> = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  return m ? `${m[3]}-${mm[m[1]]}-${m[2].padStart(2,'0')}` : s;
+};
+
+const normPos = (opt: RawOptionPosition, currentPrice: number, ticker: string) => {
+  const type = String(opt.optionType || opt.type || 'CALL').toUpperCase();
+  const contracts = Number(opt.contracts) || 0;
+  const strike = Number(opt.strike) || 0;
+  const expiry = toYYYYMMDD(String(opt.expiry || ''));
+  const days = Math.max(0, Math.ceil((new Date(expiry).getTime() - Date.now())/86400000));
+  let premium = Number(opt.premium ?? opt.premiumCollected ?? 0);
+  if (premium > 0 && premium < 100) premium = premium * 100 * Math.abs(contracts);
+  const moneyness = type === 'CALL' ? (currentPrice - strike)/strike : (strike - currentPrice)/strike;
+  const risk = moneyness >= 0 ? 'HIGH' : moneyness >= -0.03 ? 'MEDIUM' : 'LOW';
+  return {
+    symbol: String(opt.symbol || ticker).toUpperCase(),
+    type, strike, expiry, contracts,
+    premium, premiumCollected: premium, currentValue: opt.currentValue ?? null,
+    delta: null, gamma: null, theta: null, vega: null, iv: null,
+    daysToExpiry: days, term: days > 365 ? 'LONG_DATED' : 'SHORT_DATED',
+    assignmentProb: null, risk, wheelPnl: premium, markPnl: 0,
+  };
+};
+
+// Type for portfolio data structure
+interface PortfolioData {
+  positions?: Array<{ symbol?: string; quantity?: number; shares?: number }>;
+  metadata?: {
+    optionPositions?: RawOptionPosition[];
+  };
+  optionPositions?: RawOptionPosition[];
+  cashBalance?: number | string;
+}
+
+// Call this immediately after your portfolio image parse succeeds:
+function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
+  ticker: string; currentPrice: number; portfolio: PortfolioData;
+}) {
+  const t = ticker.toUpperCase();
+  const rawOptions = portfolio?.metadata?.optionPositions ?? portfolio?.optionPositions ?? [];
+  console.log('[LOCAL EYES DEBUG] Raw options from portfolio:', rawOptions);
+
+  const opts = rawOptions
+    .filter((o: RawOptionPosition) => {
+      const s = String(o?.symbol||'').toUpperCase();
+      const matches = !s || s === t || s.startsWith(`${t} `) || s.startsWith(`O:${t}`);
+      if (matches) {
+        console.log(`[LOCAL EYES DEBUG] Processing option:`, {
+          symbol: o.symbol,
+          type: o.type || o.optionType,
+          strike: o.strike,
+          contracts: o.contracts,
+          expiry: o.expiry,
+          premium: o.premium || o.premiumCollected
+        });
+      }
+      return matches;
+    })
+    .map((o: RawOptionPosition) => {
+      const normalized = normPos(o, currentPrice, t);
+
+      console.log(`[LOCAL EYES DEBUG] Normalized to:`, {
+        type: normalized.type,
+        strike: normalized.strike,
+        contracts: normalized.contracts,
+        risk: normalized.risk,
+        direction: normalized.contracts < 0 ? 'SOLD' : 'BOUGHT'
+      });
+      return normalized;
+    });
+
+  const shareCount = (portfolio?.positions ?? [])
+    .filter((p) => String(p?.symbol||'').toUpperCase() === t)
+    .reduce((sum: number, p) => sum + (Number(p.quantity || p.shares)||0), 0);
+
+  const wheelStrategy = {
+    shareCount,
+    currentPhase: shareCount > 0 ? 'COVERED_CALL' : 'CASH_SECURED_PUT' as const,
+    currentPositions: opts,
+  };
+
+  const wheelDeterministic = {
+    ticker: t,
+    currentPrice,
+    shareCount,
+    totalPremiumCollected: opts.reduce((s: number, p) => s + (p.premium||0), 0),
+    strategies: [],
+    positions: opts,
+    countsByLabel: opts.reduce((acc: Record<string, number>, p) => {
+      const key = `${p.contracts<0?'SOLD':'BOUGHT'} ${p.type}`;
+      acc[key] = (acc[key]||0)+1;
+      return acc;
+    }, {}),
+    wheelPhase: wheelStrategy.currentPhase,
+    cashBalance: Number(portfolio?.cashBalance||0) || 0,
+  };
+
+  const summary = { ticker: t, currentPrice, recommendation: 'Analysis complete' };
+
+  console.log('[Phase-1 LOCAL EYES] Dispatching analysis with', opts.length, 'positions');
+  window.dispatchEvent(new CustomEvent('analysis-ready', {
+    detail: { wheelStrategy, wheelDeterministic, summary }
+  }));
+  window.dispatchEvent(new Event('analysis-done'));
+}
+
 
 interface MarketstackEodData {
 	symbol: string;
@@ -46,25 +172,6 @@ interface PriceInfo {
 
 
 
-
-// Log portfolio validation
-function logPortfolioValidation(analysisPayload: any, tickerSymbol: string) {
-	if (analysisPayload.portfolio && analysisPayload.portfolio.positions) {
-		console.log('💼 [PORTFOLIO POSITIONS DETECTED]', {
-			positionCount: analysisPayload.portfolio.positions.length,
-			positions: analysisPayload.portfolio.positions,
-			totalValue: analysisPayload.portfolio.totalValue
-		});
-
-		const expectedPhase = analysisPayload.portfolio.positions.some((p: any) => p.symbol === tickerSymbol)
-			? 'COVERED_CALL'
-			: 'CASH_SECURED_PUT';
-		
-		console.log('🔍 [VALIDATION] Expected wheel phase:', expectedPhase);
-	} else {
-		console.log('❌ [NO PORTFOLIO DATA] Portfolio is missing or empty');
-	}
-}
 
 // Process chart analysis results
 function processChartAnalysisResults(chartAnalysisResults: ChartAnalysisResult[]) {
@@ -595,13 +702,21 @@ export function TickerPriceSearch({
     type IAResponse = { success: boolean; analysis?: unknown; error?: string };
     const submitAnalysis = async (payload: unknown) => {
         const useLegacy = new URLSearchParams(window.location.search).has('useLegacy');
-        const endpoint = useLegacy ? 'integrated-analysis' : 'integrated-analysis-v2';
+        // Check for v3 feature flag
+        const useV3 = import.meta.env.VITE_USE_INTEGRATED_ANALYSIS_V3 === 'true';
+        const endpoint = useV3 ? 'integrated-analysis-v3' :
+                        useLegacy ? 'integrated-analysis' : 'integrated-analysis-v2';
+        console.log(`[Analysis] Using endpoint: ${endpoint} (v3=${useV3})`);
         const out = await callFnJson<IAResponse>(endpoint, payload);
         if (!out.ok || !out.data) {
             throw new Error(out.text || (out.data as IAResponse)?.error || `HTTP ${out.status}`);
         }
         const j: IAResponse = out.data as IAResponse;
         if (j.success) {
+            console.log('[V3 Debug] Full response:', j);
+            console.log('[V3 Debug] Analysis object:', j.analysis);
+            console.log('[V3 Debug] WheelStrategy:', j.analysis?.wheelStrategy);
+            console.log('[V3 Debug] Positions:', j.analysis?.wheelStrategy?.currentPositions);
             return j.analysis; // Return analysis instead of dispatching event
         } else {
             throw new Error(j.error || 'Integrated analysis error');
@@ -679,9 +794,47 @@ export function TickerPriceSearch({
         }
 
         window.dispatchEvent(new Event('analysis-start'));
+
+        // Phase-1: Use local Eyes processing (no edge function)
+        if (USE_LOCAL_EYES && parsedPortfolio && eodData?.close != null) {
+            console.log('[Phase-1] Using LOCAL EYES - no edge function call');
+
+            if (tickerSymbol === 'IBIT,ETHA') {
+                // Handle BOTH mode locally
+                console.log('🚀 Running BOTH mode locally');
+
+                // Process IBIT
+                dispatchLocalEyes({
+                    ticker: 'IBIT',
+                    currentPrice: Number(eodData.close) || 0,
+                    portfolio: parsedPortfolio
+                });
+
+                // Process ETHA (you might want to handle this differently)
+                setTimeout(() => {
+                    dispatchLocalEyes({
+                        ticker: 'ETHA',
+                        currentPrice: Number(eodData.close) || 0,
+                        portfolio: parsedPortfolio
+                    });
+                }, 100);
+            } else {
+                // Single ticker mode
+                dispatchLocalEyes({
+                    ticker: tickerSymbol,
+                    currentPrice: Number(eodData.close) || 0,
+                    portfolio: parsedPortfolio
+                });
+            }
+
+            // No need to wait or call edge functions in Phase-1
+            return;
+        }
+
+        // Original edge function flow (for when USE_LOCAL_EYES is false)
         try {
             let finalAnalysis;
-            
+
             if (tickerSymbol === 'IBIT,ETHA') {
                 // BOTH mode: run parallel analyses and merge
                 console.log('🚀 Running BOTH mode - parallel analyses for IBIT and ETHA');
@@ -689,7 +842,7 @@ export function TickerPriceSearch({
                     runSingleAnalysis('IBIT'),
                     runSingleAnalysis('ETHA')
                 ]);
-                
+
                 // Merge the analyses for Performance/Wheel display
                 finalAnalysis = mergeAnalysesForWheel([ibitAnalysis, ethaAnalysis]);
                 console.log('✅ Merged analysis for BOTH mode:', finalAnalysis);
@@ -698,7 +851,10 @@ export function TickerPriceSearch({
                 console.log(`🎯 Running single analysis for ${tickerSymbol}`);
                 finalAnalysis = await runSingleAnalysis(tickerSymbol);
             }
-            
+
+            console.log('[V3 Debug] Final analysis before dispatch:', finalAnalysis);
+            console.log('[V3 Debug] WheelStrategy in final:', finalAnalysis?.wheelStrategy);
+
             // Dispatch the final analysis (single or merged)
             window.dispatchEvent(new CustomEvent('analysis-ready', { detail: finalAnalysis }));
         } catch (err) {

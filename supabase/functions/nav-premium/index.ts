@@ -152,14 +152,14 @@ async function getNavFromIShares(ticker: string): Promise<{ nav: number | null; 
           if (jsonData.price) {
             nav = parseFloat(jsonData.price);
           }
-        } catch (e) {
+        } catch {
           // JSON parse failed, continue
         }
       }
     }
     
     // Get the as-of date (usually today or previous business day)
-    const asOfMatch = html.match(/as\s+of[^0-9]*([\d\/\-]+)/i);
+    const asOfMatch = html.match(/as\s+of[^0-9]*([\d/-]+)/i);
     const navAsOf = asOfMatch ? new Date(asOfMatch[1]).toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
     
     // If we couldn't find NAV and it's a supported ETF, try fallback pattern

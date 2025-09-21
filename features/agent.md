@@ -154,6 +154,50 @@ export function ComponentName({ prop1, prop2 }: ComponentProps) {
 }
 ```
 
+## 🚨 FINANCIAL DATA INTEGRITY - ABSOLUTE RULES
+
+### NEVER MANIPULATE FINANCIAL DATA
+```
+❌ NEVER add position-specific hardcoded fixes
+❌ NEVER change contract signs based on specific strikes/symbols
+❌ NEVER "correct" data with if statements targeting specific positions
+❌ NEVER hide data problems with manipulations
+❌ NEVER alter quantities, prices, or positions to "fix" display issues
+```
+
+### ALWAYS PRESERVE DATA ACCURACY
+```
+✅ ALWAYS display financial data exactly as extracted
+✅ ALWAYS preserve the sign of contracts (negative = SOLD, positive = BOUGHT)
+✅ ALWAYS show problems transparently - don't hide them
+✅ ALWAYS fix the root cause (e.g., extraction logic) not symptoms
+✅ ALWAYS maintain audit trail - financial data must be traceable
+```
+
+### Examples of UNACCEPTABLE Code:
+```typescript
+// ❌ NEVER DO THIS - Position-specific manipulation
+if (position.strike === 30 && position.type === 'PUT') {
+  position.contracts = Math.abs(position.contracts); // FORBIDDEN
+}
+
+// ❌ NEVER DO THIS - Hardcoded "fixes" for specific data
+if (symbol === 'ETHA' && strike === 30) {
+  contracts = -contracts; // ABSOLUTELY FORBIDDEN
+}
+
+// ❌ NEVER DO THIS - Changing financial values
+position.premium = position.premium || 100; // NO DEFAULT VALUES
+```
+
+### If Financial Data Looks Wrong:
+1. **DO NOT** add a quick fix
+2. **DO** trace the issue to its source
+3. **DO** fix the extraction/parsing logic
+4. **DO** update prompts or parsing rules
+5. **DO** display the data as-is and log the issue
+6. **DO** inform the user of any discrepancies
+
 ## ⚠️ Critical Safety Checks
 
 ### Before ANY Code Change:
@@ -163,6 +207,20 @@ export function ComponentName({ prop1, prop2 }: ComponentProps) {
 ✓ Have I tested locally?
 ✓ Does this follow existing patterns?
 ✓ Have I handled all error cases?
+✓ Have I run npm run lint to check for warnings?
+✓ Am I preserving financial data integrity?
+✓ Am I fixing root causes, not symptoms?
+```
+
+### After EVERY Code Change:
+```
+✓ Run npm run lint immediately
+✓ Fix all ESLint errors (red)
+✓ Review all warnings (yellow), especially:
+  - Unused variables
+  - Complexity over 30
+  - Type safety issues
+✓ Document any warnings that can't be fixed
 ```
 
 ### Red Flags - STOP Immediately:
@@ -227,9 +285,19 @@ curl -X POST http://localhost:54321/functions/v1/function-name \
 
 **After Frontend Changes**:
 ```bash
-# Check for errors
-npm run build
-npm run lint
+# MANDATORY: Check for ALL warnings and errors
+npm run lint  # MUST RUN - catches unused variables, complexity, type issues
+
+# Check the output for:
+# - Unused variables (e.g., 'highPrice' is assigned but never used)
+# - Complexity warnings (functions over 30 complexity need refactoring)
+# - Type safety issues
+# - Any other ESLint warnings
+
+# Fix ALL errors before proceeding
+# Address warnings or document why they're acceptable
+
+npm run build  # Ensure it compiles
 
 # Visual testing
 npm run dev

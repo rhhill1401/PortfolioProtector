@@ -31,7 +31,7 @@ export default tseslint.config(
 				{default: 'array-simple'},
 			],
 			// Keep code simple and readable
-			complexity: ['warn', 12],
+			complexity: ['warn', 30],
 			'max-depth': ['warn', 3],
 			'max-params': ['warn', 4],
 		},

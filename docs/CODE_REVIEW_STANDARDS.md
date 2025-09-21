@@ -75,19 +75,43 @@ Backend and Supabase note
 - **Empty states** - handle empty data sets
 - **Network failures** - graceful degradation
 
-### 8. Security
+### 8. Financial Data Integrity (CRITICAL)
+- **NEVER manipulate financial data** - display exactly as extracted
+- **NO position-specific fixes** - no hardcoded corrections for specific strikes/symbols
+- **Preserve contract signs** - negative = SOLD, positive = BOUGHT
+- **Fix root causes** - fix extraction logic, not symptoms
+- **Transparent problems** - show issues, don't hide them
+- **Audit trail** - financial data must be traceable
+
+#### Examples of FORBIDDEN Code:
+```typescript
+// ❌ NEVER: Position-specific manipulation
+if (position.strike === 30 && position.type === 'PUT') {
+  position.contracts = Math.abs(position.contracts); // ABSOLUTELY FORBIDDEN
+}
+
+// ❌ NEVER: Hardcoded data "corrections"
+if (symbol === 'ETHA' && contracts < 0) {
+  contracts = -contracts; // COMPLETELY UNACCEPTABLE
+}
+
+// ❌ NEVER: Default financial values
+position.premium = position.premium || 100; // NO DEFAULTS FOR FINANCIAL DATA
+```
+
+### 9. Security
 - **Input validation** - sanitize all user inputs
 - **No secrets** - never commit API keys or sensitive data
 - **XSS prevention** - use proper escaping
 - **Dependency security** - check for vulnerabilities
 
-### 9. Testing Considerations
+### 10. Testing Considerations
 - **Edge cases** - test boundary conditions
 - **Error scenarios** - test failure paths
 - **User workflows** - test complete user journeys
 - **Regression testing** - ensure fixes don't break existing features
 
-### 10. Production Readiness
+### 11. Production Readiness
 - **Environment variables** - properly configured
 - **Build optimization** - production builds work correctly
 - **Error logging** - appropriate error tracking
@@ -119,6 +143,13 @@ After making changes, verify:
 - [ ] Code is modular and reusable
 - [ ] Performance optimized
 - [ ] Follows existing patterns
+
+### Financial Data & Security
+- [ ] NO manipulation of financial data
+- [ ] NO position-specific hardcoded fixes
+- [ ] Contract signs preserved (negative = SOLD)
+- [ ] Root causes fixed, not symptoms
+- [ ] Problems shown transparently
 
 ### Edge Cases & Security
 - [ ] Null/undefined handled

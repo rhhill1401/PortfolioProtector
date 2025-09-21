@@ -1,8 +1,9 @@
 import './App.css';
 import {TickerPriceSearch} from './components/TickerPriceSearch';
 import {useState} from 'react';
-// Import the new component placeholder (we'll create it next)
+// Import both versions of StockAnalysis
 import {StockAnalysis} from './components/StockAnalysis';
+import {StockAnalysis as StockAnalysisV2} from './components/StockAnalysisV2';
 import {PolygonTester} from './components/PolygonTester';
 import {TestWebSearch} from './components/TestWebSearch';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -10,10 +11,14 @@ import ErrorBoundary from './components/ErrorBoundary';
 function App() {
 	// The currently selected/entered ticker symbol
 	const [activeTicker, setActiveTicker] = useState<string>('');
-	
+
 	// Check if we're in test mode via URL param
 	const isTestMode = window.location.search.includes('test=polygon');
 	const isWebSearchTest = window.location.search.includes('test=websearch');
+
+	// Check feature flag for StockAnalysisV2
+	const useV2 = import.meta.env.VITE_USE_STOCK_ANALYSIS_V2 === 'true';
+	const StockAnalysisComponent = useV2 ? StockAnalysisV2 : StockAnalysis;
 
 	return (
 		<div className='flex flex-col min-h-screen w-screen bg-white text-gray-900 overflow-x-hidden'>
@@ -54,7 +59,7 @@ function App() {
                     <div className='md:w-2/3 w-full rounded-lg'>
                         {activeTicker ? (
                             <ErrorBoundary title="Analysis panel error">
-                                <StockAnalysis tickerSymbol={activeTicker} />
+                                <StockAnalysisComponent tickerSymbol={activeTicker} />
                             </ErrorBoundary>
                         ) : (
 								<div className='p-6 bg-[#F3F4F6] rounded-lg shadow-md border border-gray-200 min-h-[28rem] md:min-h-full h-full flex items-center justify-center text-center text-gray-500'>

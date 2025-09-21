@@ -62,7 +62,7 @@ export function useOptionChain(ticker: string): UseOptionChainReturn {
             setLoading(false);
             return;
           }
-        } catch (e) {
+        } catch {
           // Invalid cache, remove it
           localStorage.removeItem(cacheKey);
         }

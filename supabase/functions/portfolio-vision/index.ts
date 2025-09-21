@@ -5,6 +5,65 @@
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { parseContractCount, parseContractsFromQuantityText } from "./utils.ts";
+
+interface PortfolioRequestPayload {
+  image?: string | { url?: string };
+  ticker?: string;
+}
+
+interface OptionPosition {
+  symbol?: string;
+  optionType?: string;
+  strike?: number;
+  expiry?: string;
+  contracts?: number;
+  position?: string;
+  premiumCollected?: number;
+  premium?: number;
+  currentValue?: number;
+  profitLoss?: number;
+  percentReturn?: string;
+  daysToExpiry?: number;
+  term?: string;
+  quantityText?: string;
+  positionText?: string;
+  directionConfidence?: 'HIGH' | 'LOW';
+  signSource?: 'quantityText' | 'model';
+  [key: string]: unknown;
+}
+
+interface PortfolioResult {
+  portfolioDetected?: boolean;
+  brokerageType?: string;
+  positions?: Array<Record<string, unknown>>;
+  metadata?: { optionPositions?: OptionPosition[]; [key: string]: unknown };
+  totalValue?: number;
+  extractionConfidence?: string;
+  extractionNotes?: string;
+  [key: string]: unknown;
+}
+
+interface AiMessage {
+  content?: string;
+  refusal?: unknown;
+}
+
+interface AiChoice {
+  message?: AiMessage;
+}
+
+interface AiResponse {
+  model?: string;
+  usage?: unknown;
+  choices?: AiChoice[];
+  error?: { message?: string };
+}
+
+interface AnalysisOutcome {
+  success: boolean;
+  portfolio: PortfolioResult;
+}
 
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
@@ -20,63 +79,165 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
 
-/* ---------------- Edge entrypoint ---------------- */
-Deno.serve(async (req) => {
-  /* Pre-flight for browsers */
-  if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: { ...corsHeaders, "Access-Control-Allow-Methods": "POST" },
+const handleCorsPreflight = (req: Request): Response | null => {
+  if (req.method !== "OPTIONS") return null;
+  return new Response("ok", {
+    headers: { ...corsHeaders, "Access-Control-Allow-Methods": "POST" },
+  });
+};
+
+const normalizeImageInput = (image: unknown): string | null => {
+  if (typeof image === "string" && image.trim().length > 0) {
+    return image;
+  }
+  if (image && typeof image === "object") {
+    const maybeUrl = (image as { url?: string }).url;
+    if (typeof maybeUrl === "string" && maybeUrl.trim().length > 0) {
+      return maybeUrl;
+    }
+  }
+  return null;
+};
+
+const buildDefaultPortfolio = (notes: string): PortfolioResult => ({
+  portfolioDetected: false,
+  brokerageType: "Unknown",
+  positions: [],
+  metadata: { optionPositions: [] },
+  totalValue: 0,
+  extractionConfidence: "low",
+  extractionNotes: notes,
+});
+
+const enrichOptionPositions = (positions: OptionPosition[] | undefined): OptionPosition[] | undefined => {
+  if (!Array.isArray(positions)) return positions;
+
+  const today = new Date();
+  let correctedSigns = 0;
+  let missingQuantityText = 0;
+
+  const normalized = positions.map((opt) => {
+    let daysToExpiry = 0;
+    if (opt.expiry) {
+      try {
+        const parsed = new Date(opt.expiry);
+        if (!Number.isNaN(parsed.getTime())) {
+          const diff = parsed.getTime() - today.getTime();
+          daysToExpiry = Math.max(0, Math.ceil(diff / 86_400_000));
+        }
+      } catch (dateErr) {
+        console.warn(`⚠️ [PORTFOLIO VISION] Date parsing error for ${opt.expiry}:`, dateErr);
+      }
+    }
+
+    const rawQuantityText = typeof opt.quantityText === "string" ? opt.quantityText.trim() : "";
+    const quantityParse = parseContractsFromQuantityText(rawQuantityText);
+    const parsedContracts = parseContractCount(opt.contracts);
+    const rawContracts = typeof opt.contracts === "number" ? opt.contracts : 0;
+    const rawPosition = typeof opt.position === "string" ? opt.position.toUpperCase() : undefined;
+
+    let contracts = parsedContracts ?? rawContracts;
+    let signSource: 'quantityText' | 'model' = 'model';
+    let directionConfidence: 'HIGH' | 'LOW' = 'LOW';
+
+    if (quantityParse.contracts !== null) {
+      signSource = 'quantityText';
+      directionConfidence = quantityParse.confidence;
+      if (contracts !== quantityParse.contracts) {
+        correctedSigns += 1;
+      }
+      contracts = quantityParse.contracts;
+    } else {
+      if (!rawQuantityText) {
+        missingQuantityText += 1;
+      }
+      directionConfidence = 'LOW';
+      if (rawPosition === 'SHORT' && contracts > 0) {
+        contracts = -Math.abs(contracts);
+      } else if (rawPosition === 'LONG' && contracts < 0) {
+        contracts = Math.abs(contracts);
+      }
+    }
+
+    const normalizedPosition = contracts < 0 ? 'SHORT' : 'LONG';
+
+    return {
+      ...opt,
+      quantityText: quantityParse.normalizedText || rawQuantityText || undefined,
+      positionText: typeof opt.positionText === "string" ? opt.positionText : undefined,
+      contracts,
+      daysToExpiry,
+      term: daysToExpiry > 365 ? "LONG_DATED" : "SHORT_DATED",
+      position: normalizedPosition,
+      directionConfidence,
+      signSource,
+    };
+  });
+
+  if (normalized.length > 0) {
+    console.log(`ℹ️ [PORTFOLIO VISION] Quantity sign enforcement: corrected ${correctedSigns}/${normalized.length} legs; missing quantityText: ${missingQuantityText}`);
+  }
+
+  return normalized;
+};
+
+const logPortfolioSummary = (portfolio: PortfolioResult): void => {
+  console.log(`✅ [PORTFOLIO VISION] Successfully parsed portfolio data:`, {
+    portfolioDetected: portfolio.portfolioDetected,
+    positionCount: portfolio.positions?.length ?? 0,
+    optionPositionCount: portfolio.metadata?.optionPositions?.length ?? 0,
+    cashBalance: portfolio.cashBalance ?? 0,
+    totalValue: portfolio.totalValue,
+    confidence: portfolio.extractionConfidence,
+    brokerageType: portfolio.brokerageType,
+  });
+
+  console.log('🔍 [PORTFOLIO VISION] EXACT RESPONSE STRUCTURE:', JSON.stringify({
+    success: true,
+    portfolio,
+  }, null, 2));
+
+  if (Array.isArray(portfolio.positions) && portfolio.positions.length > 0) {
+    console.log(`📈 [POSITIONS EXTRACTED]:`, portfolio.positions);
+    portfolio.positions.forEach((pos, index) => {
+      const symbol = (pos.symbol as string | undefined) ?? 'Unknown';
+      const quantity = pos.quantity ?? 'Unknown';
+      const price = pos.currentPrice ?? 'Unknown';
+      console.log(`   Stock ${index + 1}: ${symbol} - ${quantity} shares @ $${price}`);
     });
   }
 
-  /* ----------- Input validation ----------- */
-  let payload: { image?: string; ticker?: string };
-  try {
-    payload = await req.json();
-  } catch {
-    return jsonResponse({ success: false, error: "Invalid JSON body" }, 400);
+  const optionPositions = portfolio.metadata?.optionPositions;
+  if (Array.isArray(optionPositions) && optionPositions.length > 0) {
+    console.log(`📊 [OPTION POSITIONS EXTRACTED]:`, optionPositions);
+    optionPositions.forEach((pos, index) => {
+      console.log(`   Option ${index + 1}: ${pos.symbol} $${pos.strike}${pos.optionType} ${pos.expiry} - ${pos.contracts} contracts (${pos.position}) DTE: ${pos.daysToExpiry ?? 'N/A'} P&L: $${pos.profitLoss ?? 'N/A'}`);
+    });
   }
 
-  const { image, ticker = "UNKNOWN" } = payload;
-
-  if (!image) {
-    return jsonResponse({ success: false, error: "image is required" }, 400);
+  if (!(portfolio.positions?.length) && !(portfolio.metadata?.optionPositions?.length)) {
+    console.log(`❌ [PORTFOLIO VISION] No positions extracted from image`);
   }
-  if (!OPENAI_API_KEY) {
-    return jsonResponse(
-      { success: false, error: "OpenAI API key not configured" },
-      500,
-    );
-  }
+};
 
-  /* ----------- OpenAI Vision call for Portfolio Analysis ----------- */
-  try {
-    console.log(`🔍 [PORTFOLIO VISION] Starting analysis for ticker: ${ticker}`);
-
-    const aiResp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        temperature: 0.1, // Lower temperature for more accurate data extraction
-        max_tokens: 2000, // Increased to prevent truncation with image prompts
-        response_format: { type: "json_object" }, // Enable JSON mode for guaranteed valid JSON
-        messages: [
-          {
-            role: "system",
-            content: `You MUST respond with valid JSON only. You are a financial data extraction specialist analyzing portfolio screenshots.
+const SYSTEM_PROMPT = `You MUST respond with valid JSON only. You are a financial data extraction specialist analyzing portfolio screenshots.
 
 CRITICAL REQUIREMENTS:
 1. Return ONLY valid JSON - no other text
 2. Extract ALL visible positions: CASH, STOCKS AND OPTIONS
 3. If you cannot read exact values, use "Unknown" - never guess
-4. Focus on extracting: Cash Balance, Stocks, Sold Options (Calls/Puts), Option details (Strike, Expiry, Premium)
+4. Focus on extracting: Cash Balance, Stocks, Options (Strike, Expiry, Premium, Quantity)
 5. Look for common brokerage interfaces (Robinhood, TD Ameritrade, E*TRADE, Schwab, etc.)
 6. PAY SPECIAL ATTENTION TO CASH: Look for "Cash", "Money Market", "Cash Balance" entries
-7. PAY SPECIAL ATTENTION TO OPTIONS: Look for call/put contracts you've SOLD (short positions)
+7. PAY SPECIAL ATTENTION TO OPTIONS: capture the quantity/contract cell text exactly (see below)
+8. For every option position you return:
+   - Include 'quantityText' with the exact text from the Quantity/Contracts column (e.g., "-5 M", "5 M", "(5)", "+3").
+   - Include 'positionText' if the screen shows a Long/Short/Buy/Sell label (raw text only).
+   - Derive 'contracts' strictly from 'quantityText' only. Ignore colours, P&L signs, words like "Short" unless they appear inside quantityText.
+   - Treat parentheses or a leading minus sign as SOLD (negative). If there is no minus sign or parentheses, the position is BOUGHT (positive).
+   - Letters/suffixes like "M" are decoration; do not change the sign.
+   - Provide 'contracts' as the integer count with the correct sign.
+   - If you cannot read the quantity cell, set 'quantityText' to "UNKNOWN" and 'contracts' to null. Do NOT guess the sign.
 
 Your response must be valid JSON matching this EXACT structure:
 {
@@ -103,11 +264,29 @@ Your response must be valid JSON matching this EXACT structure:
         "expiry": "2025-08-15",
         "contracts": -1,
         "position": "SHORT",
+        "quantityText": "-1 M",
+        "positionText": "Short",
         "premiumCollected": 350,
         "currentValue": 200,
         "daysToExpiry": 30,
         "profitLoss": 150,
         "percentReturn": "+42.8%",
+        "status": "Open"
+      },
+      {
+        "symbol": "SPY",
+        "optionType": "PUT",
+        "strike": 420,
+        "expiry": "2025-07-20",
+        "contracts": 2,
+        "position": "LONG",
+        "quantityText": "2 M",
+        "positionText": "Long",
+        "premium": 800,
+        "currentValue": 1200,
+        "daysToExpiry": 15,
+        "profitLoss": 400,
+        "percentReturn": "+50%",
         "status": "Open"
       }
     ]
@@ -117,20 +296,14 @@ Your response must be valid JSON matching this EXACT structure:
   "extractionNotes": "All positions clearly visible"
 }
 
-IMPORTANT: 
+IMPORTANT:
 - If you see ANY portfolio data, set portfolioDetected: true
 - If image shows no portfolio (e.g., just charts), set portfolioDetected: false
 - Extract ALL positions visible, not just the target ticker
-- Response MUST be valid JSON only - no text before or after`,
-          },
-          {
-            role: "user",
-            content: [
-              { type: "image_url", image_url: { url: image } },
-              {
-                type: "text",
-                text: `Extract all portfolio position data from this image with SPECIAL FOCUS ON CASH AND OPTIONS. 
-                
+- Response MUST be valid JSON only - no text before or after`;
+
+const buildUserPrompt = (ticker: string) => `Extract all portfolio position data from this image with SPECIAL FOCUS ON CASH AND OPTIONS.
+
 PRIMARY FOCUS: Look for ${ticker} positions (both stocks AND options), but extract ALL visible positions.
 
 CRITICAL: Look for CASH BALANCE:
@@ -138,11 +311,11 @@ CRITICAL: Look for CASH BALANCE:
 - Extract the exact dollar amount shown for cash
 - This is crucial for wheel strategy calculations
 
-CRITICAL: Look for OPTION positions you have SOLD (covered calls, cash-secured puts):
+CRITICAL: Look for OPTION positions (covered calls, cash-secured puts, long options):
 - Option symbols (e.g., "IBIT 61C JUL19", "AAPL 150P DEC15")
 - Strike prices (e.g., $61, $65.44, $150)
 - Expiry dates (e.g., "Jul-19-2025", "Aug-15-2025")
-- Number of contracts (e.g., -1, -4, +2)
+- Number of contracts (capture the Quantity column text exactly, e.g., "-1 M", "5 M", "(5)").
 - Premium collected/paid
 - Current option value
 - Profit/Loss on options
@@ -156,162 +329,282 @@ ALSO look for stock positions (extract into main "positions" array):
 - Total market values
 - Gain/loss percentages
 
-WHEEL STRATEGY FOCUS: If you see sold calls (-1 contracts, -4 contracts), extract ALL details into metadata.optionPositions:
+OPTION POSITION RULES - CRITICAL:
+- SOLD options (you wrote/sold): the Quantity cell will have a minus sign or parentheses (e.g., "-1 M", "(3)").
+- BOUGHT options (you purchased): the Quantity cell has no minus sign or parentheses (e.g., "1", "5 M").
+- Letters like "M" or other suffixes do NOT affect the sign; rely solely on the minus sign or parentheses.
+- Include 'quantityText' and 'positionText' fields in the JSON for every option position.
+- Provide the numeric 'contracts' with the correct sign derived from 'quantityText'.
+- If the quantity cell is unreadable, set 'quantityText' to "UNKNOWN" and 'contracts' to null (do NOT infer the sign).
+
+WHEEL STRATEGY FOCUS: Extract ALL option details into metadata.optionPositions:
 - Exact strike prices
-- Exact expiry dates  
-- Premium collected
+- Exact expiry dates
+- Premium collected (for sold) or paid (for bought)
 - Current profit/loss
 - Performance metrics
+- Contract direction (positive for bought, negative for sold)
 
-Return ONLY valid JSON following the exact structure specified. No text before or after the JSON.`,
-              },
-            ],
-          },
+Return ONLY valid JSON following the exact structure specified. No text before or after the JSON.`;
+
+const buildRequestBody = (image: string, ticker: string) => ({
+  model: "gpt-4o",
+  temperature: 0.1,
+  max_tokens: 2000,
+  response_format: { type: "json_object" },
+  messages: [
+    { role: "system", content: SYSTEM_PROMPT },
+    {
+      role: "user",
+      content: [
+        { type: "image_url", image_url: { url: image } },
+        { type: "text", text: buildUserPrompt(ticker) },
+      ],
+    },
+  ],
+});
+
+const QUANTITY_SYSTEM_PROMPT = `You are verifying option quantity/contract values for a brokerage screenshot.
+- Always read the Quantity/Contracts column EXACTLY as rendered (e.g., "-5 M", "5", "(3)").
+- Respond with JSON: { "quantities": [ { "key": string, "quantityText": string } ] }.
+- If a quantity is unreadable, set quantityText to "UNKNOWN" (do NOT guess).
+- Do not provide explanations or additional text.`;
+
+const buildQuantityFollowupBody = (image: string, legs: OptionPosition[]) => {
+  const lines = legs.map((leg, index) => {
+    const symbol = leg.symbol ?? "UNKNOWN";
+    const type = (leg.optionType ?? leg.type ?? "").toUpperCase();
+    const strike = leg.strike ?? "UNKNOWN";
+    const expiry = leg.expiry ?? "UNKNOWN";
+    const key = buildOptionKey(leg);
+    return `${index + 1}. key: ${key}\n   symbol: ${symbol}\n   optionType: ${type}\n   strike: ${strike}\n   expiry: ${expiry}`;
+  }).join('\n\n');
+
+  const instructions = `Read the Quantity/Contracts column for each of the following option rows. Return JSON with an array called quantities. Each entry must include the provided key and the exact quantityText. Do not infer or normalise.\n\n${lines}`;
+
+  return {
+    model: "gpt-4o",
+    temperature: 0,
+    max_tokens: 800,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: QUANTITY_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: image } },
+          { type: "text", text: instructions },
         ],
-      }),
-    });
+      },
+    ],
+  };
+};
 
-    const aiData = await aiResp.json();
-    console.log(`📊 [PORTFOLIO VISION] OpenAI response status: ${aiResp.status}`);
+const buildOptionKey = (opt: OptionPosition): string => {
+  const symbol = (opt.symbol ?? '').toUpperCase();
+  const type = (opt.optionType ?? opt.type ?? '').toUpperCase();
+  const strike = opt.strike ?? '';
+  const expiry = opt.expiry ?? '';
+  return `${symbol}|${type}|${strike}|${expiry}`;
+};
 
-    if (!aiResp.ok) {
-      console.error(`❌ [PORTFOLIO VISION] OpenAI error:`, aiData);
-      throw new Error(aiData.error?.message || "OpenAI error");
-    }
+const fetchQuantityOverrides = async (
+  image: string,
+  legs: OptionPosition[],
+): Promise<Map<string, string>> => {
+  if (legs.length === 0) return new Map();
 
-    // Debug: Check if response_format was applied
-    console.log(`🔍 [PORTFOLIO VISION] AI model used: ${aiData.model}`);
-    console.log(`🔍 [PORTFOLIO VISION] Finish reason: ${aiData.choices?.[0]?.finish_reason}`);
-    console.log(`🔍 [PORTFOLIO VISION] Usage:`, aiData.usage);
-    
-    /* -------- With JSON mode, response is guaranteed to be valid JSON -------- */
-    const txt: string = aiData.choices?.[0]?.message?.content ?? "{}";
-    console.log(`📝 [PORTFOLIO VISION] Raw AI response length: ${txt.length} chars`);
-    console.log(`📝 [PORTFOLIO VISION] Response starts with: ${txt.substring(0, 50)}`);
-    console.log(`📝 [PORTFOLIO VISION] Response ends with: ${txt.substring(txt.length - 50)}`);
+  const body = buildQuantityFollowupBody(image, legs);
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 
-    /* ----- Check for refusal in the response ----- */
-    if (aiData.choices?.[0]?.message?.refusal) {
-      console.warn("⚠️ [PORTFOLIO VISION] AI refused the request:", aiData.choices[0].message.refusal);
-      const defaultResponse = {
-        portfolioDetected: false,
-        brokerageType: "Unknown",
-        positions: [],
-        metadata: { optionPositions: [] },
-        totalValue: 0,
-        extractionConfidence: "low",
-        extractionNotes: "AI refused to process the image"
-      };
-      return jsonResponse({ success: true, portfolio: defaultResponse });
-    }
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error?.message || "OpenAI quantity follow-up error");
+  }
 
+  const content = data.choices?.[0]?.message?.content ?? "{}";
+  let parsed: { quantities?: Array<{ key?: string; quantityText?: string }> } = {};
+  try {
+    parsed = JSON.parse(content);
+  } catch (err) {
+    console.error("⚠️ [PORTFOLIO VISION] Quantity follow-up JSON parse failed:", err);
+    return new Map();
+  }
+
+  const overrides = new Map<string, string>();
+  for (const entry of parsed.quantities ?? []) {
+    if (!entry?.key || typeof entry.quantityText !== "string") continue;
+    overrides.set(entry.key, entry.quantityText);
+  }
+  return overrides;
+};
+
+const fetchAiResponse = async (image: string, ticker: string, apiKey: string) => {
+  console.log(`🔍 [PORTFOLIO VISION] Starting analysis for ticker: ${ticker}`);
+  const body = buildRequestBody(image, ticker);
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const aiData = (await response.json()) as AiResponse;
+  console.log(`📊 [PORTFOLIO VISION] OpenAI response status: ${response.status}`);
+
+  if (!response.ok) {
+    console.error(`❌ [PORTFOLIO VISION] OpenAI error:`, aiData);
+    throw new Error(aiData.error?.message || "OpenAI error");
+  }
+
+  console.log(`🔍 [PORTFOLIO VISION] AI model used: ${aiData.model}`);
+  const message = aiData.choices?.[0]?.message;
+  const finishReason = message?.refusal ? "refused" : message?.content ? `content length ${message.content.length}` : "unknown";
+  console.log(`🔍 [PORTFOLIO VISION] Finish info: ${finishReason}`);
+  console.log(`🔍 [PORTFOLIO VISION] Usage:`, aiData.usage);
+
+  const rawText = aiData.choices?.[0]?.message?.content ?? "{}";
+  console.log(`📝 [PORTFOLIO VISION] Raw AI response length: ${rawText.length} chars`);
+  console.log(`📝 [PORTFOLIO VISION] Response starts with: ${rawText.substring(0, 50)}`);
+  console.log(`📝 [PORTFOLIO VISION] Response ends with: ${rawText.substring(Math.max(0, rawText.length - 50))}`);
+
+  return { aiData, rawText };
+};
+
+const analyzePortfolioImage = async (image: string, ticker: string, apiKey: string): Promise<AnalysisOutcome> => {
+  const { aiData, rawText } = await fetchAiResponse(image, ticker, apiKey);
+
+  if (aiData.choices?.[0]?.message?.refusal) {
+    console.warn("⚠️ [PORTFOLIO VISION] AI refused the request:", aiData.choices[0].message.refusal);
+    return { success: true, portfolio: buildDefaultPortfolio("AI refused to process the image") };
+  }
+
+  try {
+    const portfolio = JSON.parse(rawText) as PortfolioResult;
+    const optionPositions = portfolio.metadata?.optionPositions;
+    let normalizedOptionPositions: OptionPosition[] | undefined;
     try {
-      const portfolio = JSON.parse(txt);
-      
-      // 🛡️ DEFENSIVE: Post-process option positions with error handling
-      // This was causing JSON parsing failures when date parsing crashed
-      if (portfolio.metadata?.optionPositions && Array.isArray(portfolio.metadata.optionPositions)) {
-        const today = new Date();
-        
-        try {
-          portfolio.metadata.optionPositions = portfolio.metadata.optionPositions.map((opt: any) => {
-            let days = 0;
-            
-            // 🛡️ DEFENSIVE: Safe date parsing with multiple fallbacks
-            try {
-              if (opt.expiry) {
-                const d = new Date(opt.expiry);
-                if (!isNaN(d.getTime())) {
-                  days = Math.max(0, Math.ceil((d.getTime() - today.getTime()) / 86_400_000));
-                } else {
-                  console.warn(`⚠️ [PORTFOLIO VISION] Invalid expiry date format: ${opt.expiry}`);
-                }
-              }
-            } catch (dateError) {
-              console.warn(`⚠️ [PORTFOLIO VISION] Date parsing error for ${opt.expiry}:`, dateError);
-            }
-            
-            return {
-              ...opt,
-              daysToExpiry: days,
-              term: days > 365 ? 'LONG_DATED' : 'SHORT_DATED',
-              position: opt.contracts < 0 ? 'SHORT' : 'LONG' // Keep position for bought/sold distinction
-            };
-          });
-        } catch (postProcessError) {
-          console.error(`⚠️ [PORTFOLIO VISION] Post-processing failed, keeping original data:`, postProcessError);
-          // Keep original optionPositions if post-processing fails
-        }
-      }
-      
-      console.log(`✅ [PORTFOLIO VISION] Successfully parsed portfolio data:`, {
-        portfolioDetected: portfolio.portfolioDetected,
-        positionCount: portfolio.positions?.length || 0,
-        optionPositionCount: portfolio.metadata?.optionPositions?.length || 0,
-        cashBalance: portfolio.cashBalance || 0,
-        totalValue: portfolio.totalValue,
-        confidence: portfolio.extractionConfidence,
-        brokerageType: portfolio.brokerageType
-      });
-
-      // 🔍 CRITICAL DEBUG: Log exact structure being returned
-      console.log('🔍 [PORTFOLIO VISION] EXACT RESPONSE STRUCTURE:', JSON.stringify({
-        success: true,
-        portfolio: portfolio
-      }, null, 2));
-
-      // Detailed logging of extracted positions
-      if (portfolio.positions && portfolio.positions.length > 0) {
-        console.log(`📈 [POSITIONS EXTRACTED]:`, portfolio.positions);
-        portfolio.positions.forEach((pos: any, index: number) => {
-          console.log(`   Stock ${index + 1}: ${pos.symbol} - ${pos.quantity} shares @ $${pos.currentPrice}`);
-        });
-      }
-
-      // Detailed logging of extracted option positions
-      if (portfolio.metadata?.optionPositions && portfolio.metadata.optionPositions.length > 0) {
-        console.log(`📊 [OPTION POSITIONS EXTRACTED]:`, portfolio.metadata.optionPositions);
-        portfolio.metadata.optionPositions.forEach((pos: any, index: number) => {
-          console.log(`   Option ${index + 1}: ${pos.symbol} $${pos.strike}${pos.optionType} ${pos.expiry} - ${pos.contracts} contracts (${pos.position}) DTE: ${pos.daysToExpiry || 'N/A'} P&L: $${pos.profitLoss}`);
-        });
-      }
-
-      if (!portfolio.positions?.length && !portfolio.metadata?.optionPositions?.length) {
-        console.log(`❌ [PORTFOLIO VISION] No positions extracted from image`);
-      }
-
-      return jsonResponse({ success: true, portfolio }, 200);
-    } catch (parseError) {
-      console.error(`❌ [PORTFOLIO VISION] JSON parse error:`, parseError);
-      console.error(`🔍 [PORTFOLIO VISION] Failed to parse text (length: ${txt.length})`);
-      console.error(`🔍 [PORTFOLIO VISION] First 1000 chars:`, txt.substring(0, 1000));
-      console.error(`🔍 [PORTFOLIO VISION] Last 500 chars:`, txt.substring(txt.length - 500));
-      
-      // Log the exact position where parsing failed
-      const errorMatch = parseError.message.match(/at position (\d+)/);
-      if (errorMatch) {
-        const errorPos = parseInt(errorMatch[1]);
-        console.error(`🔍 [PORTFOLIO VISION] Error position ${errorPos}, context:`, 
-          txt.substring(Math.max(0, errorPos - 50), Math.min(txt.length, errorPos + 50)));
-      }
-      
-      // With JSON mode enabled, this should rarely happen
-      // Return a minimal valid response
-      const fallbackResponse = {
-        portfolioDetected: false,
-        brokerageType: "Unknown",
-        positions: [],
-        metadata: { optionPositions: [] },
-        totalValue: 0,
-        extractionConfidence: "low",
-        extractionNotes: `JSON parsing failed despite JSON mode. This is unusual. Error: ${parseError.message}`
+      normalizedOptionPositions = enrichOptionPositions(optionPositions);
+      portfolio.metadata = {
+        ...portfolio.metadata,
+        optionPositions: normalizedOptionPositions,
       };
-      
-      return jsonResponse({ 
-        success: true, 
-        portfolio: fallbackResponse 
-      }, 200);
+    } catch (postProcessError) {
+      console.error(`⚠️ [PORTFOLIO VISION] Post-processing failed, keeping original data:`, postProcessError);
     }
+
+    const optionPositionsArray = normalizedOptionPositions ?? [];
+    const missingQuantity = optionPositionsArray.filter((pos) => pos.signSource !== 'quantityText' || !pos.quantityText);
+    if (missingQuantity.length > 0) {
+      try {
+        const overrides = await fetchQuantityOverrides(image, missingQuantity);
+        let followUpCorrections = 0;
+
+        optionPositionsArray.forEach((pos) => {
+          const key = buildOptionKey(pos);
+          const overrideText = overrides.get(key);
+          if (!overrideText) return;
+
+          if (overrideText === 'UNKNOWN') {
+            pos.quantityText = 'UNKNOWN';
+            pos.directionConfidence = 'LOW';
+            pos.signSource = pos.signSource ?? 'model';
+            return;
+          }
+
+          const parsed = parseContractsFromQuantityText(overrideText);
+          if (parsed.contracts === null) {
+            pos.quantityText = parsed.normalizedText || overrideText;
+            pos.signSource = pos.signSource ?? 'model';
+            pos.directionConfidence = 'LOW';
+            return;
+          }
+
+          if (pos.contracts !== parsed.contracts) {
+            followUpCorrections += 1;
+          }
+
+          pos.quantityText = parsed.normalizedText || overrideText;
+          pos.contracts = parsed.contracts;
+          pos.position = pos.contracts < 0 ? 'SHORT' : 'LONG';
+          pos.directionConfidence = parsed.confidence;
+          pos.signSource = 'quantityText';
+        });
+
+        if (followUpCorrections > 0) {
+          console.log(`ℹ️ [PORTFOLIO VISION] Quantity follow-up corrected ${followUpCorrections} legs via secondary pass`);
+        }
+      } catch (followUpError) {
+        console.error('⚠️ [PORTFOLIO VISION] Quantity follow-up failed:', followUpError);
+      }
+    }
+
+    logPortfolioSummary(portfolio);
+    return { success: true, portfolio };
+  } catch (parseError) {
+    console.error(`❌ [PORTFOLIO VISION] JSON parse error:`, parseError);
+    console.error(`🔍 [PORTFOLIO VISION] Failed to parse text (length: ${rawText.length})`);
+    console.error(`🔍 [PORTFOLIO VISION] First 1000 chars:`, rawText.substring(0, 1000));
+    console.error(`🔍 [PORTFOLIO VISION] Last 500 chars:`, rawText.substring(Math.max(0, rawText.length - 500)));
+
+    const message = parseError instanceof Error ? parseError.message : String(parseError);
+    const match = message.match(/at position (\d+)/);
+    if (match) {
+      const idx = Number.parseInt(match[1], 10);
+      console.error(`🔍 [PORTFOLIO VISION] Error position ${idx}, context:`, rawText.substring(Math.max(0, idx - 50), Math.min(rawText.length, idx + 50)));
+    }
+
+    const fallback = buildDefaultPortfolio(`JSON parsing failed despite JSON mode. Error: ${message}`);
+    return { success: true, portfolio: fallback };
+  }
+};
+
+const validatePayload = async (req: Request): Promise<
+  | { ok: true; value: { image: string; ticker: string } }
+  | { ok: false; response: Response }
+> => {
+  let payload: PortfolioRequestPayload;
+  try {
+    payload = await req.json();
+  } catch {
+    return { ok: false, response: jsonResponse({ success: false, error: "Invalid JSON body" }, 400) };
+  }
+
+  const ticker = typeof payload.ticker === "string" && payload.ticker.trim().length > 0 ? payload.ticker.trim() : "UNKNOWN";
+  const normalizedImage = normalizeImageInput(payload.image);
+
+  if (!normalizedImage) {
+    return { ok: false, response: jsonResponse({ success: false, error: "image is required" }, 400) };
+  }
+
+  return { ok: true, value: { image: normalizedImage, ticker } };
+};
+
+/* ---------------- Edge entrypoint ---------------- */
+Deno.serve(async (req) => {
+  const preflight = handleCorsPreflight(req);
+  if (preflight) return preflight;
+
+  const validation = await validatePayload(req);
+  if (!validation.ok) return validation.response;
+
+  if (!OPENAI_API_KEY) {
+    return jsonResponse({ success: false, error: "OpenAI API key not configured" }, 500);
+  }
+
+  try {
+    const { image, ticker } = validation.value;
+    const analysis = await analyzePortfolioImage(image, ticker, OPENAI_API_KEY);
+    return jsonResponse(analysis, 200);
   } catch (err) {
     console.error("💥 [PORTFOLIO VISION] Unexpected error:", err);
     return jsonResponse({ success: false, error: String(err) }, 500);

@@ -81,6 +81,19 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
 
   const riskLevel = getRiskLevel();
 
+  const cardToneClasses = (() => {
+    switch (riskLevel.label) {
+      case 'HIGH RISK':
+        return 'bg-red-50 border-red-200';
+      case 'MODERATE RISK':
+        return 'bg-amber-50 border-amber-200';
+      case 'LOW RISK':
+        return 'bg-green-50 border-green-200';
+      default:
+        return 'bg-gray-50 border-gray-200';
+    }
+  })();
+
   // Determine position direction for display
   const displayDirection = position.contracts < 0 ? 'SOLD' : 'BOUGHT';
 
@@ -117,7 +130,7 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
   const assignmentProbValue = parseFloat(assignmentProb);
 
   return (
-    <div className={`border rounded-lg p-4 bg-gray-50 mb-4 ${className}`}>
+    <div className={`border rounded-lg p-4 mb-4 transition-colors ${cardToneClasses} ${className}`}>
       <div className="flex justify-between items-start mb-3">
         <div>
           <div className="font-semibold text-lg">

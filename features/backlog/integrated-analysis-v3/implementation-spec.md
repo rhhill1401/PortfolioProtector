@@ -7,6 +7,30 @@
 ### 🎯 Vision
 Create a CLIENT-SIDE analysis system that shows positions and strategies immediately without any edge function calls, then progressively enhances with Greeks and AI recommendations.
 
+### 🧪 Testing Portfolio-Vision Edge Function
+
+**ALWAYS USE THIS TEST** when working with portfolio-vision:
+```bash
+# Test with ETHA ticker (default)
+node tests/edge-functions/test-portfolio-vision.cjs
+
+# Test with specific ticker
+node tests/edge-functions/test-portfolio-vision.cjs IBIT
+```
+
+**Test Details:**
+- **Script Location:** `tests/edge-functions/test-portfolio-vision.cjs`
+- **Image Source:** Automatically reads latest PNG from `/Users/Killmunger/Documents/examples-portfolio/`
+- **For ETHA:** Uses portfolio screenshot with "5.43.04" in filename
+- **Output:** Saves to `tests/outputs/portfolio-vision-[ticker]-[timestamp].json`
+- **Credentials:** Reads from `.env.local`
+
+**Understanding Contract Signs:**
+- **Negative contracts** (e.g., -5) = SOLD/SHORT positions (you wrote/sold the option)
+- **Positive contracts** (e.g., 5) = BOUGHT/LONG positions (you purchased the option)
+- The "M" suffix in screenshots (e.g., "5 M") is just a display marker
+- The AI reads the exact Quantity column text - if no minus sign, it's positive
+
 ### 🏗️ Architecture Overview
 
 ```
@@ -25,7 +49,7 @@ Key Points:
 
 ### 📋 Implementation TODO List
 
-## Phase 1: Eyes Module (CLIENT-SIDE) ⏳ CURRENT
+## Phase 1: Eyes Module (CLIENT-SIDE) ✅ COMPLETED
 
 ### ❌ What We Did Wrong
 - Created `integrated-analysis-v3` edge function (should NOT exist yet)
@@ -34,13 +58,13 @@ Key Points:
 
 ### ✅ What We Should Do
 - [x] Enable StockAnalysisV2 flag
-- [ ] Create `/src/services/deterministic/eyes.ts` (CLIENT-SIDE)
-- [ ] Parse portfolio-vision response directly in StockAnalysisV2
-- [ ] Display OptionPositionCards immediately (no edge function)
-- [ ] Test with ETHA portfolio screenshot
-- [ ] Verify cards display without any edge function calls
+- [x] Create `/src/services/deterministic/eyes.ts` (CLIENT-SIDE)
+- [x] Parse portfolio-vision response directly in StockAnalysisV2
+- [x] Display OptionPositionCards immediately (no edge function)
+- [x] Test with ETHA portfolio screenshot
+- [x] Verify cards display without any edge function calls
 
-## Phase 2: Calculator Module (CLIENT-SIDE) 🔜 NEXT
+## Phase 2: Calculator Module (CLIENT-SIDE) 🚧 IN PROGRESS
 
 - [ ] Create `/src/services/deterministic/calculator.ts`
 - [ ] Implement strategy detection (CLIENT-SIDE):

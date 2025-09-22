@@ -7,6 +7,7 @@ type DetectArgs = {
   shareCount: number;
   cashBalance: number;
   currentPrice: number;
+  shareBasis?: number | null; // average cost basis per share for covered call math
 };
 
 type DetectResult = {
@@ -57,6 +58,7 @@ const detectCoveredCalls = (
   positions: PositionDet[],
   shareCount: number,
   currentPrice: number,
+  shareBasis?: number | null,
 ): StrategySummary[] => {
   const soldCalls = positions
     .filter((p) => p.type === 'CALL' && p.contracts < 0)
@@ -79,8 +81,16 @@ const detectCoveredCalls = (
     remainingShares -= coveredQty * 100;
 
     const netPremium = signAwarePremium(call, coveredQty);
-    const upside = Math.max(call.strike - currentPrice, 0) * 100 * coveredQty;
-    const maxProfit = netPremium + upside;
+    const basis = typeof shareBasis === 'number' && !Number.isNaN(shareBasis)
+      ? shareBasis
+      : currentPrice; // fallback to current price if basis unknown
+
+    // Max Profit at assignment: (K - B)*100*qty + credit
+    const maxProfit = (call.strike - basis) * 100 * coveredQty + netPremium;
+    // Max Loss to $0: B*100*qty - credit (as a positive value)
+    const maxLoss = Math.max(basis * 100 * coveredQty - netPremium, 0);
+    const perShareCredit = (netPremium / coveredQty) / 100;
+    const breakeven = basis - perShareCredit;
 
     strategies.push({
       id: `covered-call-${call.symbol}-${call.strike}-${call.expiry}-${index}`,
@@ -88,7 +98,8 @@ const detectCoveredCalls = (
       legCount: 1,
       netPremium,
       maxProfit,
-      maxLoss: null,
+      maxLoss,
+      breakeven,
       riskProfile: 'covered',
       riskLevel: 'LOW',
       tags: ['INCOME'],
@@ -142,6 +153,8 @@ const detectBullCallSpreads = (positions: PositionDet[]): StrategySummary[] => {
         const credit = netPremium > 0 ? netPremium : 0;
         const maxProfit = credit > 0 ? spreadWidth - credit : spreadWidth - debit;
         const maxLoss = credit > 0 ? credit : debit;
+        const perShareDebit = debit > 0 ? (debit / quantity) / 100 : 0;
+        const breakeven = debit > 0 ? longLeg.strike + perShareDebit : null; // common case
 
         strategies.push({
           id: `bull-call-spread-${longLeg.symbol}-${longLeg.expiry}-${longLeg.strike}-${shortLeg.strike}`,
@@ -150,6 +163,7 @@ const detectBullCallSpreads = (positions: PositionDet[]): StrategySummary[] => {
           netPremium,
           maxProfit,
           maxLoss,
+          breakeven,
           riskProfile: 'defined',
           riskLevel: 'LOW',
           tags: ['SPREAD', 'DEFINED RISK'],
@@ -181,17 +195,20 @@ const detectCashSecuredPuts = (
       const netPremium = signAwarePremium(put, quantity);
       const maxProfit = netPremium;
       const maxLoss = requirement - netPremium;
+      const perShareCredit = (netPremium / quantity) / 100;
+      const breakeven = put.strike - perShareCredit;
 
       strategies.push({
         id: `cash-secured-put-${put.symbol}-${put.strike}-${put.expiry}-${index}`,
         label: 'Cash Secured Put',
         legCount: 1,
-        netPremium,
-        maxProfit,
-        maxLoss,
-        riskProfile: 'defined',
-        riskLevel: 'LOW',
-        tags: ['INCOME', 'DEFINED RISK'],
+      netPremium,
+      maxProfit,
+      maxLoss,
+      breakeven,
+      riskProfile: 'defined',
+      riskLevel: 'LOW',
+      tags: ['INCOME', 'DEFINED RISK'],
         components: [formatLeg('SHORT', quantity, put)],
         description: `Reserved $${(put.strike * 100).toFixed(2)} per contract`,
       });
@@ -244,6 +261,8 @@ const detectBullPutSpreads = (positions: PositionDet[]): StrategySummary[] => {
 
         const maxProfit = credit > 0 ? credit : spreadWidth - debit; // prefer credit structure
         const maxLoss = credit > 0 ? spreadWidth - credit : debit;
+        const perShareCredit = credit > 0 ? (credit / quantity) / 100 : 0;
+        const breakeven = credit > 0 ? shortLeg.strike - perShareCredit : null; // common case
 
         strategies.push({
           id: `bull-put-spread-${longLeg.symbol}-${longLeg.expiry}-${longLeg.strike}-${shortLeg.strike}`,
@@ -252,6 +271,7 @@ const detectBullPutSpreads = (positions: PositionDet[]): StrategySummary[] => {
           netPremium,
           maxProfit,
           maxLoss,
+          breakeven,
           riskProfile: 'defined',
           riskLevel: 'LOW',
           tags: ['SPREAD', 'DEFINED RISK', credit > 0 ? 'CREDIT' : 'DEBIT'],
@@ -272,11 +292,12 @@ export const detectStrategies = ({
   shareCount,
   cashBalance,
   currentPrice,
+  shareBasis,
 }: DetectArgs): DetectResult => {
   const strategies: StrategySummary[] = [];
 
   strategies.push(
-    ...detectCoveredCalls(positions, shareCount, currentPrice),
+    ...detectCoveredCalls(positions, shareCount, currentPrice, shareBasis ?? null),
     ...detectBullCallSpreads(positions),
     ...detectBullPutSpreads(positions),
     ...detectCashSecuredPuts(positions, cashBalance),

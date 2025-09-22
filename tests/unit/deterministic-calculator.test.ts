@@ -60,6 +60,7 @@ describe('detectStrategies', () => {
       shareCount: 100,
       cashBalance: 10000,
       currentPrice: 34.73,
+      shareBasis: 34.58,
     });
 
     expect(wheelPhase).toBe('COVERED_CALL');
@@ -68,6 +69,10 @@ describe('detectStrategies', () => {
     const coveredCall = strategies.find((s) => s.label === 'Covered Call');
     expect(coveredCall).toBeTruthy();
     expect(coveredCall?.netPremium).toBeCloseTo(304.33, 2);
+    // Max loss uses basis (to $0): 34.58*100 - 304.33 = 3153.67
+    expect(coveredCall?.maxLoss).toBeCloseTo(3153.67, 2);
+    // Max profit at strike 40: (40-34.58)*100 + 304.33 = 846.33
+    expect(coveredCall?.maxProfit).toBeCloseTo(846.33, 2);
 
     const bullSpread = strategies.find((s) => s.label === 'Bull Call Spread');
     expect(bullSpread).toBeTruthy();
@@ -104,6 +109,7 @@ describe('detectStrategies', () => {
       shareCount: 0,
       cashBalance: 0,
       currentPrice: 34.73,
+      shareBasis: 34.58,
     });
 
     const spread = strategies.find((s) => s.label === 'Bull Put Spread');

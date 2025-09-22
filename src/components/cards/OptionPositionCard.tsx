@@ -31,14 +31,27 @@ export interface OptionPositionCardProps {
 }
 
 // Helper functions for formatting
-const formatPremium = (value: number | undefined): string => {
-  if (value === undefined || value === null) return 'N/A';
-  // Check if the value has way too many decimal places (like the screenshot)
-  const strValue = value.toString();
-  if (strValue.includes('.') && strValue.split('.')[1].length > 10) {
-    return `$${value.toFixed(18)}`; // Show the long decimal like in screenshot
+// Always show whole dollars scaled to per-contract value (×100) with rounding up
+const formatWholeContractDollars = (
+  value: number | undefined | null,
+  {
+    showSign = false,
+  }: {
+    showSign?: boolean;
+  } = {},
+): string => {
+  if (value === undefined || value === null || isNaN(Number(value))) return 'N/A';
+  let v = Number(value);
+  // Heuristic: if it looks like a per-share option price (e.g., 5.10), scale to per-contract
+  if (Math.abs(v) < 50) v = v * 100;
+  const rounded = Math.ceil(Math.abs(v));
+  let prefix = '';
+  if (showSign) {
+    prefix = v > 0 ? '+' : v < 0 ? '-' : '';
+  } else if (v < 0) {
+    prefix = '-';
   }
-  return `$${value}`;
+  return `${prefix}$${rounded.toLocaleString()}`;
 };
 
 const formatGreekValue = (value: number | null | undefined, decimals: number = 2): string => {
@@ -110,12 +123,20 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
   const term = position.term || (daysToExpiry > 365 ? 'LONG_DATED' : 'SHORT_DATED');
   const termDisplay = term === 'LONG_DATED' ? 'Long-dated' : 'Short-dated';
 
-  // Get premium value (check both fields)
-  const premiumValue = position.premium || position.premiumCollected;
-
   // Get P&L values
-  const wheelPnl = position.wheelPnl || position.wheelNet || 0;
-  const markPnl = position.markPnl || position.optionMTM || 0;
+  const totalPremium = Number(position.premium ?? position.premiumCollected ?? 0);
+  const currentTotal = Number(position.currentValue ?? 0);
+  const profitLoss = position.profitLoss;
+  const markBased = position.markPnl ?? position.optionMTM;
+  const derivedPnL = profitLoss !== undefined && profitLoss !== null
+    ? Number(profitLoss)
+    : markBased !== undefined && markBased !== null
+      ? Number(markBased)
+      : position.contracts < 0
+        ? totalPremium - currentTotal
+        : currentTotal - totalPremium;
+  const pnlTone = derivedPnL >= 0 ? 'text-green-600' : 'text-red-600';
+  const hasPnL = Number.isFinite(derivedPnL);
 
   // Format assignment probability
   const getAssignmentProbability = (): string => {
@@ -131,8 +152,8 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
 
   return (
     <div className={`border rounded-lg p-4 mb-4 transition-colors ${cardToneClasses} ${className}`}>
-      <div className="flex justify-between items-start mb-3">
-        <div>
+      <div className="flex justify-between items-start mb-3 gap-4">
+        <div className="flex-1">
           <div className="font-semibold text-lg">
             ${position.strike} {position.type} {position.expiry} ({Math.abs(position.contracts)} contract{Math.abs(position.contracts) > 1 ? 's' : ''})
           </div>
@@ -145,31 +166,38 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
             </span>
           </div>
         </div>
+        <div className="text-right text-sm">
+          <span className="text-gray-600">Current:&nbsp;</span>
+          <span className="font-semibold text-lg">
+            {formatWholeContractDollars(position.currentValue)}
+          </span>
+        </div>
       </div>
 
-      <div className="text-sm text-gray-600 mb-2">
-        {daysToExpiry} days to expiry • {termDisplay}
-      </div>
+      <div className="text-sm text-gray-600 mb-2">{daysToExpiry} days to expiry • {termDisplay}</div>
 
       <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span className="text-gray-600">Premium: </span>
-          <span className="font-semibold">{formatPremium(premiumValue)}</span>
-        </div>
-        <div className="text-right">
-          <span className="text-gray-600">Current: </span>
-          <span className="font-semibold">${position.currentValue || 'N/A'}</span>
-        </div>
-        <div>
-          <span className="text-gray-600">Wheel P&L: </span>
-          <span className="font-bold text-lg text-green-600">
-            ${Math.round(wheelPnl).toLocaleString()}
-          </span>
-          <br />
-          <span className={`text-xs ${markPnl < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-            Buy-to-close: ${Math.round(markPnl).toLocaleString()}
-          </span>
-        </div>
+        {position.contracts < 0 && (
+          <div className="space-y-1">
+            <div>
+              <span className="text-gray-600">Premium: </span>
+              <span className="font-bold text-lg text-green-600">
+                {formatWholeContractDollars(totalPremium)}
+              </span>
+            </div>
+            <div className={`text-xs ${(position.markPnl ?? position.optionMTM ?? 0) < 0 ? 'text-red-500' : 'text-gray-500'}`}>
+              Buy-to-close: ${Math.round((position.markPnl ?? position.optionMTM ?? 0)).toLocaleString()}
+            </div>
+          </div>
+        )}
+        {position.contracts >= 0 && hasPnL && (
+          <div>
+            <span className="text-gray-600">P&L: </span>
+            <span className={`font-semibold ${pnlTone}`}>
+              {formatWholeContractDollars(derivedPnL, { showSign: true })}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Greeks Display */}

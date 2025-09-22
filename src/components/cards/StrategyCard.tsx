@@ -109,11 +109,21 @@ export const StrategyCard = ({ strategy, className }: StrategyCardProps) => {
         </div>
         <div>
           <span className="text-slate-500">Max Loss</span>
-          <div className="font-semibold text-rose-600">{limitLabel(strategy.maxLoss)}</div>
+          <div className="font-semibold text-rose-600">
+            {limitLabel(strategy.maxLoss)}
+            {strategy.riskProfile === 'covered' && (
+              <span className="ml-1 text-xs text-slate-500">to $0</span>
+            )}
+          </div>
         </div>
         <div>
-          <span className="text-slate-500">Legs</span>
-          <div className="font-semibold text-slate-800">{strategy.legCount}</div>
+          <span className="text-slate-500">Breakeven</span>
+          <div
+            className="font-semibold text-slate-800"
+            title="Breakeven = basis − credit per share"
+          >
+            {formatCurrencyCeil(strategy.breakeven)}
+          </div>
         </div>
         <div>
           <span className="text-slate-500">Risk Profile</span>

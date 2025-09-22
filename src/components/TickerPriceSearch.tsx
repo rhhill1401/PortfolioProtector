@@ -38,6 +38,7 @@ interface RawOptionPosition {
   premium?: number | string;
   premiumCollected?: number | string;
   currentValue?: number | string | null;
+  profitLoss?: number | string | null;
 }
 
 const toYYYYMMDD = (s?: string): string => {
@@ -58,13 +59,19 @@ const normPos = (opt: RawOptionPosition, currentPrice: number, ticker: string) =
   if (premium > 0 && premium < 100) premium = premium * 100 * Math.abs(contracts);
   const moneyness = type === 'CALL' ? (currentPrice - strike)/strike : (strike - currentPrice)/strike;
   const risk = moneyness >= 0 ? 'HIGH' : moneyness >= -0.03 ? 'MEDIUM' : 'LOW';
+  const currentValue = Number(opt.currentValue ?? 0);
+  let profitLoss = opt.profitLoss !== undefined && opt.profitLoss !== null ? Number(opt.profitLoss) : null;
+  if (profitLoss === null && !Number.isNaN(currentValue)) {
+    profitLoss = (contracts < 0 ? premium - currentValue : currentValue - premium) || 0;
+  }
   return {
     symbol: String(opt.symbol || ticker).toUpperCase(),
     type, strike, expiry, contracts,
-    premium, premiumCollected: premium, currentValue: opt.currentValue ?? null,
+    premium, premiumCollected: premium, currentValue,
+    profitLoss,
     delta: null, gamma: null, theta: null, vega: null, iv: null,
     daysToExpiry: days, term: days > 365 ? 'LONG_DATED' : 'SHORT_DATED',
-    assignmentProb: null, risk, wheelPnl: premium, markPnl: 0,
+    assignmentProb: null, risk, wheelPnl: premium, markPnl: profitLoss,
   };
 };
 
@@ -115,9 +122,20 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
       return normalized;
     });
 
-  const shareCount = (portfolio?.positions ?? [])
-    .filter((p) => String(p?.symbol||'').toUpperCase() === t)
-    .reduce((sum: number, p) => sum + (Number(p.quantity || p.shares)||0), 0);
+  const symbolPositions = (portfolio?.positions ?? [])
+    .filter((p) => String(p?.symbol||'').toUpperCase() === t);
+
+  const shareCount = symbolPositions
+    .reduce((sum: number, p) => sum + (Number((p as any).quantity || (p as any).shares)||0), 0);
+
+  // Weighted average cost basis when multiple lots exist
+  const totalCost = symbolPositions
+    .reduce((sum: number, p) => {
+      const qty = Number((p as any).quantity || (p as any).shares) || 0;
+      const basis = Number((p as any).purchasePrice) || 0;
+      return sum + qty * basis;
+    }, 0);
+  const shareBasis = shareCount > 0 ? totalCost / shareCount : null;
 
   const cashBalance = Number(portfolio?.cashBalance || 0) || 0;
 
@@ -126,6 +144,7 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
     shareCount,
     cashBalance,
     currentPrice,
+    shareBasis,
   });
 
   const wheelStrategy = {
@@ -149,6 +168,7 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
     }, {}),
     wheelPhase,
     cashBalance,
+    shareBasis,
   };
 
   const summary = { ticker: t, currentPrice, recommendation: 'Analysis complete' };

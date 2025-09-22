@@ -70,20 +70,27 @@ Key Points:
 - [ ] Implement strategy detection (CLIENT-SIDE):
   - [x] Covered calls (shares + sold calls)
   - [x] Bull call spreads (long lower strike + short higher strike)
-  - [ ] Bull put spreads (short higher strike + long lower strike) ← TODO
+  - [x] Bull put spreads (short higher strike + long lower strike)
   - [x] Cash secured puts (sold puts with cash)
   - [x] Wheel phase detection
 - [ ] **Number Display Formatting**: Round ALL monetary values to nearest whole dollar
   - [x] StrategyCard displays rounded-up values (Net Premium / Max P/L)
-  - [ ] Calculator keeps decimals internally; verify other UI joins
-  - [ ] Apply round-up to any additional metric rows we add (e.g., Breakeven)
+  - [x] Calculator keeps decimals internally; UI rounds on render
+  - [x] Apply round-up to Breakeven and other metrics
 - [ ] **Code Quality**: Fix ESLint complexity errors in StockAnalysisV2.tsx
   - [ ] Resolve "Function 'StockAnalysis' has a complexity of..." errors
   - [ ] Break down complex functions into smaller, focused functions
   - [ ] Extract repeated logic into helper functions
   - [ ] Ensure all functions stay under complexity threshold (30)
 - [x] Create StrategyCard component (risk‑tinted background; accessible contrast)
-- [x] Display strategy cards immediately after position cards
+- [x] Display strategy cards immediately after option position cards
+- [x] Add header toggle to switch between Current Positions and Detected Strategies (default: Positions)
+- [x] Show Breakeven in StrategyCard metrics
+- [x] Covered Call metrics use cost basis: Max Profit, Max Loss (to $0), Breakeven
+- [x] Covered Call Max Loss shows contextual hint "to $0"
+- [x] Breakeven metric includes tooltip (basis − credit per share)
+- [x] Current Option Positions: hide Premium and Wheel P&L for BOUGHT calls/puts
+- [x] Current values display as whole dollars; small per‑share decimals are shown ×100 with rounding
 - [ ] Add unit tests for strategy detection
 - [x] NO EDGE FUNCTION - all client-side math
 
@@ -92,7 +99,11 @@ Key Points:
 - The StrategyCard is implemented and now rounds up dollar values for display only, matching the presentation rule.
 - Risk tint mapping now matches OptionPositionCard (LOW=green, MEDIUM=amber, HIGH=red) with ≥4.5:1 contrast.
 - Deterministic calculator detects: Covered Calls, Bull Call Spreads, and Cash‑Secured Puts; it also derives Wheel Phase.
-- Bull Put Spread detection is not yet implemented — this is why ETHA shows a Bull Call Spread card but no Bull Put Spread card even though the test data includes a long 30P and short 33P for 2025‑10‑17. This will be addressed in Phase 2 Step 2.
+- Bull Put Spread detection is implemented; ETHA 30P/33P credit spread is recognized with credit, max loss, and breakeven.
+- Strategy view toggle sits in the Current Option Positions card header; OFF shows Positions, ON shows Strategies.
+- Covered Calls calculate with actual average cost basis from portfolio-vision when available; otherwise fall back to current price.
+- StrategyCard shows Breakeven when available (Covered, CSP, Bull spreads), otherwise displays "—".
+- Current Option Positions: Wheel P&L is only shown for SOLD positions; it is hidden for BOUGHT calls/puts to avoid confusion.
 
 ## Phase 3: Weather Module (Greeks via Edge Function) 📅 PLANNED
 

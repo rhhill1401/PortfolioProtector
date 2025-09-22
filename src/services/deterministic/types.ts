@@ -51,6 +51,7 @@ export interface StrategySummary {
   netPremium: number;
   maxProfit?: number | null;
   maxLoss?: number | null;
+  breakeven?: number | null;  // per-share price breakeven, when applicable
   riskProfile?: 'defined' | 'covered' | 'undefined';
   riskLevel?: RiskLevel;
   tags?: string[];

@@ -66,16 +66,33 @@ Key Points:
 
 ## Phase 2: Calculator Module (CLIENT-SIDE) 🚧 IN PROGRESS
 
-- [ ] Create `/src/services/deterministic/calculator.ts`
+- [x] Create `/src/services/deterministic/calculator.ts`
 - [ ] Implement strategy detection (CLIENT-SIDE):
-  - [ ] Covered calls (shares + sold calls)
-  - [ ] Bull spreads (bought low strike + sold high strike)
-  - [ ] Cash secured puts (sold puts with cash)
-  - [ ] Wheel phase detection
-- [ ] Create StrategyCard component
-- [ ] Display strategy cards immediately after position cards
+  - [x] Covered calls (shares + sold calls)
+  - [x] Bull call spreads (long lower strike + short higher strike)
+  - [ ] Bull put spreads (short higher strike + long lower strike) ← TODO
+  - [x] Cash secured puts (sold puts with cash)
+  - [x] Wheel phase detection
+- [ ] **Number Display Formatting**: Round ALL monetary values to nearest whole dollar
+  - [x] StrategyCard displays rounded-up values (Net Premium / Max P/L)
+  - [ ] Calculator keeps decimals internally; verify other UI joins
+  - [ ] Apply round-up to any additional metric rows we add (e.g., Breakeven)
+- [ ] **Code Quality**: Fix ESLint complexity errors in StockAnalysisV2.tsx
+  - [ ] Resolve "Function 'StockAnalysis' has a complexity of..." errors
+  - [ ] Break down complex functions into smaller, focused functions
+  - [ ] Extract repeated logic into helper functions
+  - [ ] Ensure all functions stay under complexity threshold (30)
+- [x] Create StrategyCard component (risk‑tinted background; accessible contrast)
+- [x] Display strategy cards immediately after position cards
 - [ ] Add unit tests for strategy detection
-- [ ] NO EDGE FUNCTION - all client-side math
+- [x] NO EDGE FUNCTION - all client-side math
+
+### Phase 2 Status Notes
+
+- The StrategyCard is implemented and now rounds up dollar values for display only, matching the presentation rule.
+- Risk tint mapping now matches OptionPositionCard (LOW=green, MEDIUM=amber, HIGH=red) with ≥4.5:1 contrast.
+- Deterministic calculator detects: Covered Calls, Bull Call Spreads, and Cash‑Secured Puts; it also derives Wheel Phase.
+- Bull Put Spread detection is not yet implemented — this is why ETHA shows a Bull Call Spread card but no Bull Put Spread card even though the test data includes a long 30P and short 33P for 2025‑10‑17. This will be addressed in Phase 2 Step 2.
 
 ## Phase 3: Weather Module (Greeks via Edge Function) 📅 PLANNED
 
@@ -86,6 +103,13 @@ Key Points:
 - [ ] Progressively update risk labels when Greeks arrive
 - [ ] Update assignment probability from delta
 - [ ] Handle API failures gracefully
+
+### Out of Scope moved here (future strategy detection/enrichment)
+- Bear spreads (Bear Call Spread, Bear Put Spread)
+- Calendars and diagonals
+- Iron Condors and Butterflies
+- Straddles and Strangles
+- Multi‑leg synthetic constructions (e.g., covered strangle)
 
 ## Phase 4: Coach Module (AI via Edge Function) 💭 FUTURE
 

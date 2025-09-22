@@ -49,10 +49,13 @@ export interface StrategySummary {
   label: string;              // "Covered Call", "Bull Call Spread", etc.
   legCount: number;
   netPremium: number;
-  maxProfit?: number;
-  maxLoss?: number;
+  maxProfit?: number | null;
+  maxLoss?: number | null;
   riskProfile?: 'defined' | 'covered' | 'undefined';
+  riskLevel?: RiskLevel;
+  tags?: string[];
   components: string[];       // ["LONG 1 × $34 CALL (2025-12-19)", ...]
+  description?: string;
 }
 
 /**

@@ -18,6 +18,7 @@ import {
 	estimateAssignmentProb
 } from '@/services/wheelMath';
 import { calculateAggregateMetrics } from '@/services/optionLookup';
+import type { DeterministicResult } from '@/services/deterministic/types';
 import { groupPositionsByTimeframe, formatExpiryLabel } from '@/services/wheelTimeAnalysis';
 
 interface StockAnalysisProps {
@@ -229,6 +230,7 @@ interface StockAnalysisData {
     confidence?: number;
     additionalDataNeeded?: string;
     wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
+    wheelDeterministic?: DeterministicResult;
     vix?: number; // VIX value for volatility display
     marketSentiment?: MarketSentiment; // NEW - comprehensive market analysis
     // Optional nested recommendations object produced by integrated-analysis
@@ -521,6 +523,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			// Normalize the data structure - handle both wheelAnalysis and wheelStrategy
         const normalizedData = {
             ...(e.detail as any),
+            wheelDeterministic: (e.detail as any).wheelDeterministic,
             wheelStrategy: (e.detail as any).wheelAnalysis || (e.detail as any).wheelStrategy
         } as StockAnalysisData;
 

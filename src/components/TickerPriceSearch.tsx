@@ -14,6 +14,7 @@ import { greeksFetcher, type OptionPosition } from '@/services/greeksFetcher';
 import type { OptionQuote } from '@/services/optionLookup';
 import { callFn, callFnJson } from '@/services/supabaseFns';
 import { MarketDataFetcher } from '@/services/marketDataFetcher';
+import { detectStrategies } from '@/services/deterministic/calculator';
 import { rangeDaysMap, inferTimeframe, createPriceContext, convertFileToBase64, type ChartMetric, type KeyLevel } from '@/utils/analysis';
 
 /* ---------- types ---------- */
@@ -118,10 +119,20 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
     .filter((p) => String(p?.symbol||'').toUpperCase() === t)
     .reduce((sum: number, p) => sum + (Number(p.quantity || p.shares)||0), 0);
 
+  const cashBalance = Number(portfolio?.cashBalance || 0) || 0;
+
+  const { strategies, wheelPhase } = detectStrategies({
+    positions: opts,
+    shareCount,
+    cashBalance,
+    currentPrice,
+  });
+
   const wheelStrategy = {
     shareCount,
-    currentPhase: shareCount > 0 ? 'COVERED_CALL' : 'CASH_SECURED_PUT' as const,
+    currentPhase: wheelPhase,
     currentPositions: opts,
+    strategyCount: strategies.length,
   };
 
   const wheelDeterministic = {
@@ -129,15 +140,15 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
     currentPrice,
     shareCount,
     totalPremiumCollected: opts.reduce((s: number, p) => s + (p.premium||0), 0),
-    strategies: [],
+    strategies,
     positions: opts,
     countsByLabel: opts.reduce((acc: Record<string, number>, p) => {
       const key = `${p.contracts<0?'SOLD':'BOUGHT'} ${p.type}`;
       acc[key] = (acc[key]||0)+1;
       return acc;
     }, {}),
-    wheelPhase: wheelStrategy.currentPhase,
-    cashBalance: Number(portfolio?.cashBalance||0) || 0,
+    wheelPhase,
+    cashBalance,
   };
 
   const summary = { ticker: t, currentPrice, recommendation: 'Analysis complete' };

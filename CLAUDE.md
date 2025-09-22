@@ -272,6 +272,53 @@ Without `deno.json`, the bundler will hang during deployment
 - Options Greeks chart showing assignment probabilities
 - Wheel Execution, Assignment Success, Continuation Plan tab content
 
+## Testing Strategy: Unit Tests vs End-to-End Tests
+
+### Understanding Our Two Test Types
+
+**Unit Tests** (Fast, Local, Free):
+- **What**: Test individual functions in isolation with fake data
+- **Where**: `tests/unit/` directory
+- **Runner**: Vitest
+- **Cost**: Free - no API calls
+- **Speed**: ~400ms for all tests
+- **Purpose**: Verify logic works correctly (e.g., parsing "5 M" → 5)
+
+**End-to-End (E2E) Tests** (Slow, Real, Costs Money):
+- **What**: Test the complete system with real API calls
+- **Where**: `tests/edge-functions/` directory
+- **Runner**: Node.js scripts
+- **Cost**: Real money - calls OpenAI API
+- **Speed**: 10-30 seconds per test
+- **Purpose**: Verify entire system works (image → AI → response)
+
+### Running Tests
+
+```bash
+# Unit Tests (run these frequently during development)
+npm test                # Run all unit tests once
+npm run test:unit       # Same as above
+npm run test:watch      # Run tests on file changes
+
+# Specific unit test
+npx vitest run tests/unit/portfolio-vision-utils.test.ts
+
+# End-to-End Tests (run before deployment)
+npm run test:e2e        # Test portfolio-vision with ETHA
+node tests/edge-functions/test-portfolio-vision.cjs IBIT  # Test with specific ticker
+```
+
+### What Our Unit Tests Verify
+
+The unit tests in `tests/unit/portfolio-vision-utils.test.ts` verify the fix works:
+- ✅ `"5 M"` → 5 (positive/LONG position)
+- ✅ `"-5 M"` → -5 (negative/SHORT position)
+- ✅ `"(5)"` → -5 (parentheses mean SHORT)
+- ✅ Unicode minus signs handled
+- ✅ Spaces handled correctly
+
+These tests match exactly what the E2E test confirms with real screenshots.
+
 ## Testing Edge Functions
 
 ### Portfolio-Vision Testing

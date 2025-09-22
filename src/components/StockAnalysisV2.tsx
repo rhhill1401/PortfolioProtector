@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/card';
 import {Progress} from '@/components/ui/progress';
 import {Tabs, TabsContent, TabsList, TabsTrigger} from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 import axios from 'axios';
 import { useOptionChain } from '@/hooks/useOptionChain';
 import { useWheelQuotes } from '@/hooks/useWheelQuotes';
@@ -19,13 +20,15 @@ import {
 } from '@/services/wheelMath';
 import { calculateAggregateMetrics } from '@/services/optionLookup';
 import { groupPositionsByTimeframe, formatExpiryLabel } from '@/services/wheelTimeAnalysis';
+import type { DeterministicResult } from '@/services/deterministic/types';
 
 // Import our new modular card components
 import {
   OptionPositionCard,
   PositionStatusCard,
   IVEnvironmentCard,
-  AssignmentRiskCard
+  AssignmentRiskCard,
+  StrategyCard,
 } from '@/components/cards';
 
 interface StockAnalysisProps {
@@ -237,6 +240,7 @@ interface StockAnalysisData {
     confidence?: number;
     additionalDataNeeded?: string;
     wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
+    wheelDeterministic?: DeterministicResult;
     vix?: number; // VIX value for volatility display
     marketSentiment?: MarketSentiment; // NEW - comprehensive market analysis
     // Optional nested recommendations object produced by integrated-analysis
@@ -325,7 +329,9 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		percent: null,
 	});
 	const [vix, setVix] = useState<number | null>(null);
-	const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    // View toggle: false = show current option positions, true = show detected strategies
+    const [showStrategies, setShowStrategies] = useState(false);
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -513,10 +519,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			}
 			
 			// Normalize the data structure - handle both wheelAnalysis and wheelStrategy
-        const normalizedData = {
-            ...(e.detail as any),
-            wheelStrategy: (e.detail as any).wheelAnalysis || e.detail.wheelStrategy
-        } as StockAnalysisData;
+	        const normalizedData = {
+	            ...(e.detail as any),
+	            wheelDeterministic: (e.detail as any).wheelDeterministic,
+	            wheelStrategy: (e.detail as any).wheelAnalysis || e.detail.wheelStrategy
+	        } as StockAnalysisData;
 			
 			// Add error handling before setting state
 			try {
@@ -747,15 +754,31 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							className='space-y-4'>
                         {/* Debug logging removed from JSX to satisfy ReactNode typing */}
 							
-							{analysisData?.wheelStrategy ? (
-								<>
+                        {analysisData?.wheelStrategy ? (
+                            <>
 
-									<Card className="w-full">
-										<CardHeader className="pb-3">
-											<CardTitle className="text-lg">Current Option Positions</CardTitle>
-										</CardHeader>
-										<CardContent>
-											{(() => {
+                                <Card className="w-full">
+                                    <CardHeader className="pb-3">
+                                        <div className="flex items-center justify-between gap-4">
+                                            <CardTitle className="text-lg">
+                                                {showStrategies ? 'Detected Strategies' : 'Current Option Positions'}
+                                            </CardTitle>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-sm text-gray-600">
+                                                    {showStrategies ? 'Current Option Positions' : 'Detected Strategies'}
+                                                </span>
+                                                <Switch
+                                                    checked={showStrategies}
+                                                    onCheckedChange={(v) => setShowStrategies(v)}
+                                                    size="sm"
+                                                    aria-label="Toggle between current positions and detected strategies"
+                                                />
+                                            </div>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent>
+                                        {!showStrategies ? (
+											(() => {
 												const positions = analysisData?.wheelStrategy?.currentPositions || [];
 												const currentPrice = analysisData?.summary?.currentPrice || priceInfo.price || 0;
 												const normalized = positions.map(p => ({
@@ -787,9 +810,20 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 														{normalized.length === 0 && <div className="text-gray-500 text-sm">No active option positions</div>}
 													</div>
 												);
-											})()}
-										</CardContent>
-									</Card>
+                                        })()
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {analysisData?.wheelDeterministic?.strategies && analysisData.wheelDeterministic.strategies.length > 0 ? (
+                                                    analysisData.wheelDeterministic.strategies.map((strategy) => (
+                                                        <StrategyCard key={strategy.id} strategy={strategy} />
+                                                    ))
+                                                ) : (
+                                                    <div className="text-gray-500 text-sm">No strategies detected</div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
 								</>
 							) : (
 								<div className="text-center py-8">

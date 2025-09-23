@@ -1,4 +1,4 @@
-import {useState, useEffect, useRef, useMemo} from 'react';
+import {useState, useEffect, useRef, useMemo, useCallback} from 'react';
 import {
 	Card,
 	CardContent,
@@ -21,6 +21,7 @@ import {
 import { calculateAggregateMetrics } from '@/services/optionLookup';
 import { groupPositionsByTimeframe, formatExpiryLabel } from '@/services/wheelTimeAnalysis';
 import type { DeterministicResult } from '@/services/deterministic/types';
+import { buildGreeksKey, type OptionGreeks } from '@/services/greeks/fetcher';
 
 // Import our new modular card components
 import {
@@ -242,8 +243,8 @@ interface StockAnalysisData {
     wheelStrategy?: WheelStrategy; // NEW - wheel strategy data
     wheelDeterministic?: DeterministicResult;
     vix?: number; // VIX value for volatility display
-    marketSentiment?: MarketSentiment; // NEW - comprehensive market analysis
-    // Optional nested recommendations object produced by integrated-analysis
+	marketSentiment?: MarketSentiment; // NEW - comprehensive market analysis
+	// Optional nested recommendations object produced by integrated-analysis
         recommendations?: {
             positionSnapshot?: Array<{
                 type: string;
@@ -290,6 +291,7 @@ interface StockAnalysisData {
             nextReview?: string;
         };
     };
+    optionGreeks?: Record<string, OptionGreeks>;
     // Optional chart metrics injected from frontend
     chartMetrics?: Array<{
         timeframe?: string;
@@ -332,8 +334,76 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     // View toggle: false = show current option positions, true = show detected strategies
     const [showStrategies, setShowStrategies] = useState(false);
+    const [optionGreeksMap, setOptionGreeksMap] = useState<Map<string, OptionGreeks>>(new Map());
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
+
+    const mergeOptionGreeks = useCallback((incoming: Record<string, OptionGreeks> | undefined) => {
+        if (!incoming) return;
+        const entries = Object.entries(incoming);
+        if (entries.length === 0) return;
+        setOptionGreeksMap((prev) => {
+            const merged = new Map(prev);
+            entries.forEach(([key, value]) => {
+                if (value) merged.set(key, value);
+            });
+            return merged;
+        });
+    }, []);
+
+    const enrichPosition = useCallback((position: any) => {
+        const symbol = String(position.symbol || tickerSymbol || '').toUpperCase();
+        const strike = Number(position.strike);
+        const expiry = String(position.expiry || '');
+        const optionType = String(position.type || position.optionType || 'CALL').toUpperCase();
+        const key = buildGreeksKey({ symbol, strike, expiry, optionType });
+        const greeks = optionGreeksMap.get(key);
+        if (!greeks) return position;
+
+        const delta = greeks.delta ?? position.delta ?? null;
+        const gamma = greeks.gamma ?? position.gamma ?? null;
+        const theta = greeks.theta ?? position.theta ?? null;
+        const vega = greeks.vega ?? position.vega ?? null;
+        const iv = greeks.iv ?? position.iv ?? null;
+        const daysToExpiry = greeks.dte ?? position.daysToExpiry;
+
+        let risk = position.risk;
+        if (typeof delta === 'number' && !Number.isNaN(delta)) {
+            const absDelta = Math.abs(delta);
+            if (absDelta >= 0.75) risk = 'HIGH';
+            else if (absDelta >= 0.35) risk = 'MEDIUM';
+            else risk = 'LOW';
+        }
+
+        const assignmentProb =
+            typeof delta === 'number' && !Number.isNaN(delta)
+                ? `${(Math.abs(delta) * 100).toFixed(1)}%`
+                : position.assignmentProb;
+
+        return {
+            ...position,
+            delta,
+            gamma,
+            theta,
+            vega,
+            iv,
+            daysToExpiry,
+            risk,
+            assignmentProb,
+        };
+    }, [optionGreeksMap, tickerSymbol]);
+
+    const normalizeOptionPosition = useCallback((position: any) => {
+        const optionType = ((position.optionType || position.type || 'CALL').toString().toUpperCase() === 'CALL'
+            ? 'CALL'
+            : 'PUT') as 'CALL' | 'PUT';
+        const base = {
+            ...position,
+            type: optionType,
+            optionType,
+        };
+        return enrichPosition(base);
+    }, [enrichPosition]);
 
 	
 	const { data: optionChainData } = useOptionChain(tickerSymbol);
@@ -524,6 +594,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	            wheelDeterministic: (e.detail as any).wheelDeterministic,
 	            wheelStrategy: (e.detail as any).wheelAnalysis || e.detail.wheelStrategy
 	        } as StockAnalysisData;
+	        mergeOptionGreeks((e.detail as any).optionGreeks as Record<string, OptionGreeks> | undefined);
 			
 			// Add error handling before setting state
 			try {
@@ -545,10 +616,21 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				handler as EventListener
 			);
 	}, []);
+
+    useEffect(() => {
+        const greeksHandler = (event: Event) => {
+            const custom = event as CustomEvent<{ greeks?: Record<string, OptionGreeks> }>;
+            mergeOptionGreeks(custom.detail?.greeks);
+        };
+        window.addEventListener('analysis:greeks-ready', greeksHandler);
+        return () => window.removeEventListener('analysis:greeks-ready', greeksHandler);
+    }, [mergeOptionGreeks]);
+
 	useEffect(() => {
 		const start = () => {
 			setIsAnalyzing(true);
 			setProgress(15); // initial jump so bar is visible
+            setOptionGreeksMap(new Map());
 			if (progressTimer.current) clearInterval(progressTimer.current);
 			// increment toward 90 while analyzing
 			progressTimer.current = setInterval(() => {
@@ -781,10 +863,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											(() => {
 												const positions = analysisData?.wheelStrategy?.currentPositions || [];
 												const currentPrice = analysisData?.summary?.currentPrice || priceInfo.price || 0;
-												const normalized = positions.map(p => ({
-													...p,
-													type: ((p.optionType || p.type || 'CALL').toString().toUpperCase() === 'CALL' ? 'CALL' : 'PUT') as 'CALL' | 'PUT'
-												}));
+                                        const normalized = positions.map(normalizeOptionPosition);
 												const soldCalls = normalized.filter(p => (p.contracts || 0) < 0 && p.type === 'CALL');
 												const boughtCalls = normalized.filter(p => (p.contracts || 0) > 0 && p.type === 'CALL');
 												const soldPuts = normalized.filter(p => (p.contracts || 0) < 0 && p.type === 'PUT');
@@ -847,7 +926,8 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 										<CardContent>
 											<div className="space-y-4">
 												{(() => {
-													const positions = analysisData.wheelStrategy?.currentPositions || [];
+													const rawPositions = analysisData.wheelStrategy?.currentPositions || [];
+													const positions = rawPositions.map(normalizeOptionPosition);
 													const currentPrice = displayData?.summary?.currentPrice || priceInfo.price || 0;
 													
 													// Generate plain English guidance for each position
@@ -1015,11 +1095,12 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											<div className="space-y-4">
 												{(() => {
 													// Get positions and quotes
-													const positions = analysisData.wheelStrategy?.currentPositions || [];
-													console.log('[WHEEL METRICS UI] Positions from analysis:', positions);
-													console.log('[WHEEL METRICS UI] Wheel quotes:', wheelQuotes);
-													
-													const timeGroups = groupPositionsByTimeframe(positions, wheelQuotes);
+                                            const positions = analysisData.wheelStrategy?.currentPositions || [];
+                                            const enrichedPositions = positions.map(normalizeOptionPosition);
+                                            console.log('[WHEEL METRICS UI] Positions from analysis:', positions);
+                                            console.log('[WHEEL METRICS UI] Wheel quotes:', wheelQuotes);
+
+                                            const timeGroups = groupPositionsByTimeframe(enrichedPositions, wheelQuotes);
 													
 													// Calculate overall metrics
 													const goodQuotes = wheelQuotes.filter(q => q.success && q.quote);

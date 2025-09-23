@@ -73,17 +73,20 @@ describe('detectStrategies', () => {
     expect(coveredCall?.maxLoss).toBeCloseTo(3153.67, 2);
     // Max profit at strike 40: (40-34.58)*100 + 304.33 = 846.33
     expect(coveredCall?.maxProfit).toBeCloseTo(846.33, 2);
+    expect(coveredCall?.breakeven).toBeCloseTo(31.54, 2);
 
     const bullSpread = strategies.find((s) => s.label === 'Bull Call Spread');
     expect(bullSpread).toBeTruthy();
     expect(bullSpread?.netPremium).toBeCloseTo(-271.34, 2);
     expect(bullSpread?.maxProfit).toBeCloseTo(328.66, 2);
     expect(bullSpread?.maxLoss).toBeCloseTo(271.34, 2);
+    expect(bullSpread?.breakeven).toBeCloseTo(36.71, 2);
 
     const cashPut = strategies.find((s) => s.label === 'Cash Secured Put');
     expect(cashPut).toBeTruthy();
     expect(cashPut?.netPremium).toBeCloseTo(503.37, 2);
     expect(cashPut?.maxLoss).toBeCloseTo(2496.63, 2);
+    expect(cashPut?.breakeven).toBeCloseTo(24.97, 2);
   });
 
   it('detects bull put spreads (short higher strike, long lower strike)', () => {
@@ -122,5 +125,32 @@ describe('detectStrategies', () => {
     expect(spread?.maxProfit).toBeCloseTo(108.66, 2);
     expect(spread?.legCount).toBe(2);
     expect(spread?.riskProfile).toBe('defined');
+    expect(spread?.breakeven).toBeCloseTo(31.91, 2);
+  });
+
+  it('falls back to current price when share basis unavailable', () => {
+    const positions: PositionDet[] = [
+      basePosition({
+        symbol: 'ETHA',
+        type: 'CALL',
+        strike: 38,
+        contracts: -1,
+        premium: 250,
+        expiry: '2025-12-19',
+      }),
+    ];
+
+    const { strategies } = detectStrategies({
+      positions,
+      shareCount: 100,
+      cashBalance: 2000,
+      currentPrice: 36,
+      shareBasis: undefined,
+    });
+
+    const covered = strategies.find((s) => s.label === 'Covered Call');
+    expect(covered).toBeTruthy();
+    expect(covered?.maxProfit).toBeCloseTo(450, 2); // (38-36)*100 + 250
+    expect(covered?.breakeven).toBeCloseTo(33.5, 2); // 36 - 250/100
   });
 });

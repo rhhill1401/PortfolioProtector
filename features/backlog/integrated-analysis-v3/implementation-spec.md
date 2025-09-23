@@ -67,7 +67,7 @@ Key Points:
 ## Phase 2: Calculator Module (CLIENT-SIDE) 🚧 IN PROGRESS
 
 - [x] Create `/src/services/deterministic/calculator.ts`
-- [ ] Implement strategy detection (CLIENT-SIDE):
+- [x] Implement strategy detection (CLIENT-SIDE):
   - [x] Covered calls (shares + sold calls)
   - [x] Bull call spreads (long lower strike + short higher strike)
   - [x] Bull put spreads (short higher strike + long lower strike)
@@ -77,21 +77,15 @@ Key Points:
   - [x] StrategyCard displays rounded-up values (Net Premium / Max P/L)
   - [x] Calculator keeps decimals internally; UI rounds on render
   - [x] Apply round-up to Breakeven and other metrics
-- [ ] **Code Quality**: Fix ESLint complexity errors in StockAnalysisV2.tsx
-  - [ ] Resolve "Function 'StockAnalysis' has a complexity of..." errors
-  - [ ] Break down complex functions into smaller, focused functions
-  - [ ] Extract repeated logic into helper functions
-  - [ ] Ensure all functions stay under complexity threshold (30)
 - [x] Create StrategyCard component (risk‑tinted background; accessible contrast)
 - [x] Display strategy cards immediately after option position cards
 - [x] Add header toggle to switch between Current Positions and Detected Strategies (default: Positions)
 - [x] Show Breakeven in StrategyCard metrics
 - [x] Covered Call metrics use cost basis: Max Profit, Max Loss (to $0), Breakeven
-- [x] Covered Call Max Loss shows contextual hint "to $0"
 - [x] Breakeven metric includes tooltip (basis − credit per share)
 - [x] Current Option Positions: hide Premium and Wheel P&L for BOUGHT calls/puts
 - [x] Current values display as whole dollars; small per‑share decimals are shown ×100 with rounding
-- [ ] Add unit tests for strategy detection
+- [x] Add unit tests for strategy detection
 - [x] NO EDGE FUNCTION - all client-side math
 
 ### Phase 2 Status Notes
@@ -102,18 +96,30 @@ Key Points:
 - Bull Put Spread detection is implemented; ETHA 30P/33P credit spread is recognized with credit, max loss, and breakeven.
 - Strategy view toggle sits in the Current Option Positions card header; OFF shows Positions, ON shows Strategies.
 - Covered Calls calculate with actual average cost basis from portfolio-vision when available; otherwise fall back to current price.
-- StrategyCard shows Breakeven when available (Covered, CSP, Bull spreads), otherwise displays "—".
-- Current Option Positions: Wheel P&L is only shown for SOLD positions; it is hidden for BOUGHT calls/puts to avoid confusion.
+- StrategyCard shows Breakeven when available (Covered, CSP, Bull spreads) with tooltip explaining basis − credit/share; otherwise displays "—".
+- Current Option Positions: Wheel P&L is only shown for SOLD positions; BOUGHT calls/puts show real P&L using portfolio-vision profitLoss when available.
+- Added unit tests validating Covered Call (basis-aware), Bull Call Spread, Bull Put Spread, and Cash-Secured Put metrics including breakeven outputs and basis fallback.
+
+
 
 ## Phase 3: Weather Module (Greeks via Edge Function) 📅 PLANNED
 
-- [ ] Create `/supabase/functions/option-greeks/index.ts`
-- [ ] Create `/src/services/greeks/fetcher.ts` (client)
-- [ ] Implement batch Greeks fetching
-- [ ] Add 15-minute cache in edge function
-- [ ] Progressively update risk labels when Greeks arrive
-- [ ] Update assignment probability from delta
-- [ ] Handle API failures gracefully
+- [x] Create `/supabase/functions/option-greeks/index.ts`
+- [x] Create `/src/services/greeks/fetcher.ts` (client)
+- [x] Implement batch Greeks fetching
+- [x] Add 15-minute cache in edge function
+- [x] Progressively update risk labels when Greeks arrive
+- [x] Update assignment probability from delta
+- [x] Handle API failures gracefully
+
+### Phase 3 Status Notes
+
+- `option-greeks` edge function batches Polygon snapshot calls, caches results for 15 minutes, and returns keyed greeks maps.
+- Client fetcher consolidates requests, caches locally, and dispatches `analysis:greeks-ready` events for progressive UI updates.
+- `TickerPriceSearch` includes Greeks in analysis payloads and fires events for both local deterministic flow and edge-function flow.
+- StockAnalysisV2 merges Greeks into wheel positions, updating delta/gamma/theta/vega/IV, recalculating risk badges, and surfacing assignment probability.
+- Option cards now compute risk tiers using delta (≥0.75 high, ≥0.35 medium, else low) with moneyness fallback when Greeks are missing.
+- API failures yield warning logs but do not block deterministic data, preserving Phase 1/2 behavior offline.
 
 ### Out of Scope moved here (future strategy detection/enrichment)
 - Bear spreads (Bear Call Spread, Bear Put Spread)
@@ -131,6 +137,14 @@ Key Points:
 - [ ] Add Action Plan section
 - [ ] Cache responses for 30 minutes
 
+## Phase 5: Refactor & UX Polish 📌 BACKLOG
+
+- [ ] Reduce `StockAnalysisV2.tsx` complexity below ESLint thresholds
+  - [ ] Resolve "Function 'StockAnalysis' has a complexity of..." errors
+  - [ ] Break down complex render logic into focused subcomponents
+  - [ ] Extract repeated calculations into shared helpers
+  - [ ] Ensure all functions remain under complexity 30 post-refactor
+- [ ] Re-run full lint/test/portfolio-vision flows after refactor
 ---
 
 ## 🔄 Migration Path

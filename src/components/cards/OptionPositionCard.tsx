@@ -80,13 +80,31 @@ const formatIV = (iv: number | null | undefined): string => {
 };
 
 export function OptionPositionCard({ position, currentPrice, className = '' }: OptionPositionCardProps) {
-  // Calculate moneyness for risk assessment
+  // Calculate moneyness for fallback risk assessment
   const moneyness = position.type === 'CALL'
     ? ((currentPrice - position.strike) / position.strike) * 100
     : ((position.strike - currentPrice) / position.strike) * 100;
 
-  // Determine risk level based on moneyness
+  const fromRiskString = (riskValue: string | undefined | null) => {
+    const upper = (riskValue || '').toUpperCase();
+    if (upper.includes('HIGH')) return { label: 'HIGH RISK', colorClasses: 'bg-red-100 text-red-700' };
+    if (upper.includes('MEDIUM') || upper.includes('MODERATE')) return { label: 'MODERATE RISK', colorClasses: 'bg-yellow-100 text-yellow-700' };
+    if (upper.includes('LOW')) return { label: 'LOW RISK', colorClasses: 'bg-green-100 text-green-700' };
+    return null;
+  };
+
+  // Determine risk level prioritising delta if available
   const getRiskLevel = (): { label: string; colorClasses: string } => {
+    if (typeof position.delta === 'number' && !Number.isNaN(position.delta)) {
+      const absDelta = Math.abs(position.delta);
+      if (absDelta >= 0.75) return { label: 'HIGH RISK', colorClasses: 'bg-red-100 text-red-700' };
+      if (absDelta >= 0.35) return { label: 'MODERATE RISK', colorClasses: 'bg-yellow-100 text-yellow-700' };
+      return { label: 'LOW RISK', colorClasses: 'bg-green-100 text-green-700' };
+    }
+
+    const riskFromData = fromRiskString((position as any).risk);
+    if (riskFromData) return riskFromData;
+
     if (moneyness >= 0) return { label: 'HIGH RISK', colorClasses: 'bg-red-100 text-red-700' };
     if (moneyness >= -3) return { label: 'MODERATE RISK', colorClasses: 'bg-yellow-100 text-yellow-700' };
     return { label: 'LOW RISK', colorClasses: 'bg-green-100 text-green-700' };
@@ -231,7 +249,7 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
       </div>
 
       {/* Assignment Probability based on Delta */}
-      {position.delta !== null && position.delta !== undefined && (
+      {position.contracts < 0 && position.delta !== null && position.delta !== undefined && (
         <div className="mt-3 pt-3 border-t">
           <span className="text-gray-600">Assignment Probability: </span>
           <span className={`font-bold ${

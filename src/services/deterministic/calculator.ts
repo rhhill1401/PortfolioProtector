@@ -15,14 +15,11 @@ type DetectResult = {
   wheelPhase: WheelPhase;
 };
 
-const currency = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-});
-
 const formatLeg = (dir: 'LONG' | 'SHORT', qty: number, pos: PositionDet): string => {
-  const strike = currency.format(pos.strike).replace('$', '$');
+  const strikeValue = Number(pos.strike);
+  const strike = Number.isFinite(strikeValue)
+    ? `$${strikeValue % 1 === 0 ? strikeValue.toFixed(0) : strikeValue.toFixed(2)}`
+    : `$${pos.strike}`;
   return `${dir} ${qty} × ${strike} ${pos.type} (${pos.expiry})`;
 };
 

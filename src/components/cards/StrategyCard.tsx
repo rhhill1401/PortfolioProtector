@@ -1,20 +1,11 @@
 import clsx from 'clsx';
 import type { StrategySummary } from '@/services/deterministic/types';
 
-// Currency formatter used after rounding up for display only
-const currency = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-});
-
-// Round UP for display only (keep raw values for calculations elsewhere)
-// Positive -> ceil, Negative -> floor (so -272.34 becomes -272.00)
-const roundUpDollars = (value: number) => (value >= 0 ? Math.ceil(value) : Math.floor(value));
-
-const formatCurrencyCeil = (value?: number | null): string => {
+const formatWholeDollars = (value?: number | null, { showSign = false }: { showSign?: boolean } = {}): string => {
   if (value === null || value === undefined) return '—';
-  return currency.format(roundUpDollars(value));
+  const abs = Math.ceil(Math.abs(value));
+  const sign = value < 0 ? '-' : showSign && value > 0 ? '+' : '';
+  return `${sign}$${abs.toLocaleString()}`;
 };
 
 // Tone mapping:
@@ -56,7 +47,7 @@ const tagClassNames = (tag: string) =>
 
 const netPremiumLabel = (netPremium: number) => {
   const abs = Math.abs(netPremium);
-  const formatted = formatCurrencyCeil(abs);
+  const formatted = formatWholeDollars(abs);
   return netPremium >= 0
     ? { text: `${formatted} (credit)`, tone: 'text-emerald-600' }
     : { text: `${formatted} (debit)`, tone: 'text-rose-600' };
@@ -64,7 +55,7 @@ const netPremiumLabel = (netPremium: number) => {
 
 const limitLabel = (value?: number | null) => {
   if (value === null || value === undefined) return 'Unlimited';
-  return formatCurrencyCeil(value);
+  return formatWholeDollars(value);
 };
 
 export interface StrategyCardProps {
@@ -109,20 +100,12 @@ export const StrategyCard = ({ strategy, className }: StrategyCardProps) => {
         </div>
         <div>
           <span className="text-slate-500">Max Loss</span>
-          <div className="font-semibold text-rose-600">
-            {limitLabel(strategy.maxLoss)}
-            {strategy.riskProfile === 'covered' && (
-              <span className="ml-1 text-xs text-slate-500">to $0</span>
-            )}
-          </div>
+          <div className="font-semibold text-rose-600">{limitLabel(strategy.maxLoss)}</div>
         </div>
         <div>
           <span className="text-slate-500">Breakeven</span>
-          <div
-            className="font-semibold text-slate-800"
-            title="Breakeven = basis − credit per share"
-          >
-            {formatCurrencyCeil(strategy.breakeven)}
+          <div className="font-semibold text-slate-800" title="Breakeven = basis − credit per share">
+            {formatWholeDollars(strategy.breakeven)}
           </div>
         </div>
         <div>

@@ -8,6 +8,8 @@ export interface PositionData {
   strike?: number;
   premium?: number;
   premiumCollected?: number;
+  type?: 'CALL' | 'PUT';
+  optionType?: 'CALL' | 'PUT';
 }
 
 export interface PositionStatusCardProps {
@@ -34,63 +36,58 @@ export function PositionStatusCard({ shareCount, positions, className = '' }: Po
     };
   });
 
-  // Categorize positions by direction (SHORT/LONG) and term
-  const soldPositions = positionsWithTerm.filter(pos => pos.contracts < 0);
-  const boughtPositions = positionsWithTerm.filter(pos => pos.contracts > 0);
-
-  // Count sold positions by term
-  const soldShortDated = soldPositions.filter(pos => pos.term === 'SHORT_DATED')
-    .reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-  const soldLongDated = soldPositions.filter(pos => pos.term === 'LONG_DATED')
-    .reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-
-  // Count bought positions by term
-  const boughtShortDated = boughtPositions.filter(pos => pos.term === 'SHORT_DATED')
-    .reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-  const boughtLongDated = boughtPositions.filter(pos => pos.term === 'LONG_DATED')
-    .reduce((sum, pos) => sum + Math.abs(pos.contracts), 0);
-
-  const totalSold = soldShortDated + soldLongDated;
-  const totalBought = boughtShortDated + boughtLongDated;
-
-  // Build position summary text
-  const getPositionSummary = () => {
-    const parts = [];
-
-    // Display sold calls with term breakdown
-    if (totalSold > 0) {
-      let soldText = ` + ${totalSold} sold call${totalSold > 1 ? 's' : ''}`;
-      if (soldShortDated > 0 && soldLongDated > 0) {
-        soldText += ` (${soldShortDated} short-dated, ${soldLongDated} long-dated)`;
-      } else if (soldShortDated > 0) {
-        soldText += ' (short-dated)';
-      } else if (soldLongDated > 0) {
-        soldText += ' (long-dated)';
-      }
-      parts.push(soldText);
-    }
-
-    // Display bought calls with term breakdown
-    if (totalBought > 0) {
-      let boughtText = ` + ${totalBought} bought call${totalBought > 1 ? 's' : ''}`;
-      if (boughtShortDated > 0 && boughtLongDated > 0) {
-        boughtText += ` (${boughtShortDated} short-dated, ${boughtLongDated} long-dated)`;
-      } else if (boughtShortDated > 0) {
-        boughtText += ' (short-dated)';
-      } else if (boughtLongDated > 0) {
-        boughtText += ' (long-dated)';
-      }
-      parts.push(boughtText);
-    }
-
-    return parts.join('');
+  const counts: Record<'sold' | 'bought', Record<'CALL' | 'PUT', Record<'SHORT_DATED' | 'LONG_DATED', number>>> = {
+    sold: {
+      CALL: { SHORT_DATED: 0, LONG_DATED: 0 },
+      PUT: { SHORT_DATED: 0, LONG_DATED: 0 },
+    },
+    bought: {
+      CALL: { SHORT_DATED: 0, LONG_DATED: 0 },
+      PUT: { SHORT_DATED: 0, LONG_DATED: 0 },
+    },
   };
 
-  // Calculate total premium collected
-  const totalPremiumCollected = Math.round(positions.reduce((total, pos) => {
-    const premiumValue = pos.premium || pos.premiumCollected || 0;
-    return total + premiumValue;
-  }, 0));
+  positionsWithTerm.forEach((pos) => {
+    const type = (pos.optionType || pos.type || 'CALL').toUpperCase() === 'PUT' ? 'PUT' : 'CALL';
+    const term = pos.term === 'LONG_DATED' ? 'LONG_DATED' : 'SHORT_DATED';
+    const bucket = pos.contracts < 0 ? 'sold' : 'bought';
+    counts[bucket][type][term] += Math.abs(pos.contracts);
+  });
+
+  const describe = (direction: 'sold' | 'bought', type: 'CALL' | 'PUT') => {
+    const data = counts[direction][type];
+    const total = data.SHORT_DATED + data.LONG_DATED;
+    if (total === 0) return '';
+    const parts = [] as string[];
+    if (data.SHORT_DATED > 0) parts.push(`${data.SHORT_DATED} short-dated`);
+    if (data.LONG_DATED > 0) parts.push(`${data.LONG_DATED} long-dated`);
+    const label = `${direction === 'sold' ? 'Sold' : 'Bought'} ${type === 'CALL' ? 'calls' : 'puts'}`;
+    return `${label}: ${total}${parts.length ? ` (${parts.join(', ')})` : ''}`;
+  };
+
+  const summarySegments = [
+    describe('sold', 'CALL'),
+    describe('sold', 'PUT'),
+    describe('bought', 'CALL'),
+    describe('bought', 'PUT'),
+  ].filter(Boolean);
+
+  const positionSummary = summarySegments.join(' • ');
+
+  const totalPremiumCollectedRaw = positions.reduce((total, pos) => {
+    const premiumValue = Number(pos.premium ?? pos.premiumCollected ?? 0);
+    const sign = pos.contracts < 0 ? 1 : -1;
+    return total + premiumValue * sign;
+  }, 0);
+  const totalPremiumTone = totalPremiumCollectedRaw > 0
+    ? 'text-green-600'
+    : totalPremiumCollectedRaw < 0
+      ? 'text-red-600'
+      : 'text-gray-900';
+  const totalPremiumCollected = Math.ceil(Math.abs(totalPremiumCollectedRaw));
+  const formattedPremium = totalPremiumCollectedRaw === 0
+    ? '$0'
+    : `${totalPremiumCollectedRaw > 0 ? '+' : '-'}$${totalPremiumCollected.toLocaleString()}`;
 
   return (
     <div className={`bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-lg border border-blue-200 ${className}`}>
@@ -105,15 +102,17 @@ export function PositionStatusCard({ shareCount, positions, className = '' }: Po
             <p className='text-sm font-medium text-gray-600'>Position Status</p>
           </div>
           <p className='text-lg font-bold text-gray-900'>
-            {shareCount.toLocaleString()} shares{getPositionSummary()}
+            {shareCount.toLocaleString()} shares
           </p>
-          <p className='text-sm text-blue-600 mt-1'>
-            Net positive carry
-          </p>
+          {positionSummary && (
+            <p className='text-sm text-gray-600 mt-1'>
+              {positionSummary}
+            </p>
+          )}
           <div className='mt-3 pt-3 border-t border-blue-200'>
-            <p className='text-xs text-gray-600'>Total Premium Collected</p>
-            <p className='text-xl font-bold text-gray-900'>
-              ${totalPremiumCollected || '0'}
+            <p className='text-xs text-gray-600'>Net Premium Collected</p>
+            <p className={`text-xl font-bold ${totalPremiumTone}`}>
+              {formattedPremium}
             </p>
           </div>
         </div>

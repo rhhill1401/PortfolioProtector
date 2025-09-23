@@ -10,7 +10,7 @@ import type { PortfolioParseResult } from '@/types/portfolio';
 
 import type { UploadState, AnalysisReadiness, UploadedFile, UploadCategory } from '@/types/analysis';
 import { initialUploadState, initialReadiness } from '@/types/analysis';
-import { greeksFetcher, type OptionPosition } from '@/services/greeksFetcher';
+import { greeksFetcher, type OptionPosition } from '@/services/greeks/fetcher';
 import type { OptionQuote } from '@/services/optionLookup';
 import { callFn, callFnJson } from '@/services/supabaseFns';
 import { MarketDataFetcher } from '@/services/marketDataFetcher';
@@ -66,7 +66,11 @@ const normPos = (opt: RawOptionPosition, currentPrice: number, ticker: string) =
   }
   return {
     symbol: String(opt.symbol || ticker).toUpperCase(),
-    type, strike, expiry, contracts,
+    type,
+    optionType: type as 'CALL' | 'PUT',
+    strike,
+    expiry,
+    contracts,
     premium, premiumCollected: premium, currentValue,
     profitLoss,
     delta: null, gamma: null, theta: null, vega: null, iv: null,
@@ -122,6 +126,36 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
       return normalized;
     });
 
+  const dispatchGreeksReady = async () => {
+    try {
+      const greeksMap = await greeksFetcher.fetchGreeksForPositions(
+        opts.map((p) => ({
+          symbol: p.symbol,
+          strike: p.strike,
+          expiry: p.expiry,
+          optionType: p.type as 'CALL' | 'PUT',
+          contracts: p.contracts,
+        }))
+      );
+
+      window.dispatchEvent(
+        new CustomEvent('analysis:greeks-ready', {
+          detail: {
+            ticker: t,
+            greeks: Object.fromEntries(greeksMap),
+          },
+        })
+      );
+    } catch (error) {
+      console.error('[LOCAL EYES] Failed to fetch greeks', error);
+      window.dispatchEvent(
+        new CustomEvent('analysis:greeks-ready', {
+          detail: { ticker: t, greeks: {} },
+        })
+      );
+    }
+  };
+
   const symbolPositions = (portfolio?.positions ?? [])
     .filter((p) => String(p?.symbol||'').toUpperCase() === t);
 
@@ -175,8 +209,9 @@ function dispatchLocalEyes({ ticker, currentPrice, portfolio }: {
 
   console.log('[Phase-1 LOCAL EYES] Dispatching analysis with', opts.length, 'positions');
   window.dispatchEvent(new CustomEvent('analysis-ready', {
-    detail: { wheelStrategy, wheelDeterministic, summary }
+    detail: { wheelStrategy, wheelDeterministic, summary, optionGreeks: {} }
   }));
+  dispatchGreeksReady();
   window.dispatchEvent(new Event('analysis-done'));
 }
 
@@ -631,8 +666,14 @@ export function TickerPriceSearch({
         setIsFetchingGreeks(true);
         try {
             const normalized = normalizeOptionPositionsExpiry(positions);
-            const greeksData = await greeksFetcher.fetchGreeksForPositions(normalized);
-            setOptionGreeks(greeksData);
+    const greeksData = await greeksFetcher.fetchGreeksForPositions(normalized);
+    setOptionGreeks(greeksData);
+        window.dispatchEvent(new CustomEvent('analysis:greeks-ready', {
+            detail: {
+                ticker: tickerSymbol.toUpperCase(),
+                greeks: Object.fromEntries(greeksData),
+            },
+        }));
         } finally {
             setIsFetchingGreeks(false);
         }
@@ -885,6 +926,14 @@ export function TickerPriceSearch({
 
             console.log('[V3 Debug] Final analysis before dispatch:', finalAnalysis);
             console.log('[V3 Debug] WheelStrategy in final:', finalAnalysis?.wheelStrategy);
+
+            try {
+                if (finalAnalysis && typeof finalAnalysis === 'object') {
+                    (finalAnalysis as any).optionGreeks = Object.fromEntries(optionGreeks);
+                }
+            } catch (error) {
+                console.warn('Failed to attach optionGreeks to final analysis', error);
+            }
 
             // Dispatch the final analysis (single or merged)
             window.dispatchEvent(new CustomEvent('analysis-ready', { detail: finalAnalysis }));

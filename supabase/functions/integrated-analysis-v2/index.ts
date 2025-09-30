@@ -271,6 +271,25 @@ Deno.serve(async (req) => {
     trend,
   } = wheelAnalysis;
 
+  const clampStrike = (strike: number, price: number, kind: 'CALL' | 'PUT') => {
+    const basePrice = Number.isFinite(price) && price > 0 ? price : 1;
+    const safe = (mult: number) => Number((basePrice * mult).toFixed(2));
+    if (!Number.isFinite(strike) || strike <= 0) {
+      return safe(kind === 'CALL' ? 1.05 : 0.95);
+    }
+    const ratio = strike / basePrice;
+    if (ratio < 0.1 || ratio > 10) {
+      return safe(kind === 'CALL' ? 1.05 : 0.95);
+    }
+    return Number(strike.toFixed(2));
+  };
+
+  const fallbackExpiry = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 45);
+    return d.toISOString().slice(0, 10);
+  })();
+
   console.log('💰 [CASH BALANCE]:', {
     cashFromPortfolio: portfolio?.cashBalance,
     cashBalance,
@@ -606,12 +625,26 @@ Return this JSON structure:
       }`;
       }).join(',\n      ')
       :
-      `{
-        "strike": ${hasPosition ? (resistances.find(r => r.price > currentPrice)?.price || currentPrice * 1.05) : (supports.find(s => s.price < currentPrice)?.price || currentPrice * 0.95)},
-        "type": "${hasPosition ? 'CALL' : 'PUT'}",
-        "contracts": ${hasPosition ? -(Math.floor(currentShares / 100) || 1) : 1},
-        "reasoning": "Recommended position based on current holdings"
-      }`
+      (() => {
+        const fallbackKind = hasPosition ? 'CALL' : 'PUT';
+        const rawStrike = hasPosition
+          ? (resistances.find((r) => r.price > currentPrice)?.price || currentPrice * 1.05)
+          : (supports.find((s) => s.price < currentPrice)?.price || currentPrice * 0.95);
+        const safeStrike = clampStrike(Number(rawStrike || 0), currentPrice, fallbackKind as 'CALL' | 'PUT');
+        const contractCount = hasPosition ? -(Math.floor(currentShares / 100) || 1) : 1;
+        return `{
+        "symbol": "${ticker}",
+        "strike": ${safeStrike},
+        "expiry": "${fallbackExpiry}",
+        "type": "${fallbackKind}",
+        "contracts": ${contractCount},
+        "premium": 0,
+        "premiumCollected": 0,
+        "currentValue": 0,
+        "profitLoss": 0,
+        "reasoning": "Recommended ${fallbackKind === 'CALL' ? 'covered call' : 'cash-secured put'} using safe defaults"
+      }`;
+      })()
     }]
   },
   "summary": {

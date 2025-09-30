@@ -426,6 +426,26 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 		if (!analysisData?.wheelStrategy?.currentPositions) return [];
 		
         return analysisData.wheelStrategy.currentPositions.map(pos => {
+			const currentPrice = analysisData?.summary?.currentPrice || priceInfo.price || 0;
+			const optionKind = String(pos.optionType || pos.type || 'CALL').toUpperCase() === 'CALL' ? 'CALL' : 'PUT';
+			const clampStrike = (strike: number): number => {
+				const basePrice = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : 1;
+				const normalizedStrike = Number(strike);
+				if (!Number.isFinite(normalizedStrike) || normalizedStrike <= 0) {
+					return Number((basePrice * (optionKind === 'CALL' ? 1.05 : 0.95)).toFixed(2));
+				}
+				const ratio = normalizedStrike / basePrice;
+				if (!Number.isFinite(ratio) || ratio < 0.1 || ratio > 10) {
+					return Number((basePrice * (optionKind === 'CALL' ? 1.05 : 0.95)).toFixed(2));
+				}
+				return Number(normalizedStrike.toFixed(2));
+			};
+			const defaultExpiry = optionChainData?.chain?.expiry || (() => {
+				const d = new Date();
+				d.setDate(d.getDate() + 45);
+				return d.toISOString().slice(0, 10);
+			})();
+
 			/**
 			 * Convert option expiry strings to Polygon's required YYYY-MM-DD format.
 			 *
@@ -464,12 +484,17 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 				return dateStr;
 			};
 			
+			const resolvedExpiry = (() => {
+				const parsed = parseExpiry(pos.expiry);
+				return parsed || defaultExpiry;
+			})();
+
 			// Map position ensuring we keep all fields including premium data
             const mappedPosition = {
-                symbol: pos.symbol ?? tickerSymbol,
-                strike: pos.strike,
-                expiry: parseExpiry(pos.expiry),
-                type: ((pos.optionType || pos.type || 'CALL').toUpperCase() === 'CALL' ? 'CALL' : 'PUT') as 'CALL' | 'PUT',
+                symbol: (pos.symbol ?? tickerSymbol).toString().toUpperCase(),
+                strike: clampStrike(Number(pos.strike)),
+                expiry: resolvedExpiry,
+                type: optionKind as 'CALL' | 'PUT',
                 contracts: pos.contracts,
                 // Include both possible premium field names
                 premium: pos.premium,
@@ -479,7 +504,12 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			console.log('[WHEEL POSITIONS] Mapped position:', mappedPosition);
 			return mappedPosition;
 		});
-	}, [analysisData?.wheelStrategy?.currentPositions]);
+	}, [
+		analysisData?.wheelStrategy?.currentPositions,
+		analysisData?.summary?.currentPrice,
+		priceInfo.price,
+		optionChainData?.chain?.expiry,
+	]);
 	
 	console.log('🔄 [WHEEL POSITIONS] Formatted for API:', wheelPositions);
 	const { quotes: wheelQuotes } = useWheelQuotes(wheelPositions);

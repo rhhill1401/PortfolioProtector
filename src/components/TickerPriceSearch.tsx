@@ -618,13 +618,41 @@ export function TickerPriceSearch({
     const analyzePortfolioImage = async (imageFile: File): Promise<PortfolioParseResult | null> => {
         try {
             const base64 = await convertFileToBase64(imageFile);
-            const visionResponse = await callFn('portfolio-vision', {
+            const res = await callFn('portfolio-vision', {
                 image: base64,
                 ticker: eodData?.symbol || 'UNKNOWN',
             });
-            const visionData = (await visionResponse.json()) as VisionResponse;
-            return buildParseResultFromVision(visionData, imageFile.name);
-        } catch {
+
+            const text = await res.text();
+
+            if (!res.ok) {
+                console.error('❌ [PORTFOLIO VISION] HTTP error', {
+                    status: res.status,
+                    bodyPreview: text.slice(0, 400),
+                });
+                return null;
+            }
+
+            let visionData: VisionResponse | null = null;
+            try {
+                visionData = JSON.parse(text);
+            } catch {
+                console.error('❌ [PORTFOLIO VISION] Non-JSON response', {
+                    preview: text.slice(0, 400),
+                });
+                return null;
+            }
+
+            if (!visionData?.success) {
+                console.warn('⚠️ [PORTFOLIO VISION] success=false or missing payload', visionData);
+                return null;
+            }
+
+            const parsed = buildParseResultFromVision(visionData, imageFile.name);
+            if (!parsed) console.warn('⚠️ [PORTFOLIO VISION] portfolioDetected=false for', imageFile.name);
+            return parsed;
+        } catch (err) {
+            console.error('💥 [PORTFOLIO VISION] analyzePortfolioImage failed', err);
             return null;
         }
     };

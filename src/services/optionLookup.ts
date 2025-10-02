@@ -158,27 +158,33 @@ export function calculateAggregateMetrics(
   positions.forEach((position, index) => {
     const quote = quotes[index];
     const contractCount = Math.abs(position.contracts);
-    
+
     // Log the entire position to see what fields it has
     console.log(`[WHEEL METRICS] Full position data:`, position);
-    
-    // Premium collected (from position data) - check all possible field names
-    const premium = position.premium || position.premiumCollected || 0;
-    
-    // Check if premium is per-share (small value) or total (large value)
-    // If premium is less than 50, it's likely per-share and needs multiplication
-    const isPerShare = premium < 50;
-    const premiumTotal = isPerShare ? premium * 100 * contractCount : premium;
-    
-    console.log(`[WHEEL METRICS] Position ${position.symbol} $${position.strike}:`, {
-      premium,
-      isPerShare,
-      contractCount,
-      premiumTotal,
-      hasQuote: !!quote?.success
-    });
-    
-    totalPremiumCollected += premiumTotal;
+
+    // Premium Collected = ONLY money from SOLD positions (negative contracts)
+    // BOUGHT positions cost you money but are NOT "premium collected"
+    if (position.contracts < 0) {
+      // Premium collected (from position data) - check all possible field names
+      const premium = position.premiumCollected || position.premium || 0;
+
+      // Check if premium is per-share (small value) or total (large value)
+      // If premium is less than 50, it's likely per-share and needs multiplication
+      const isPerShare = premium < 50;
+      const premiumTotal = isPerShare ? premium * 100 * contractCount : premium;
+
+      console.log(`[WHEEL METRICS] SOLD Position ${position.symbol} $${position.strike}:`, {
+        premium,
+        isPerShare,
+        contractCount,
+        premiumTotal,
+        hasQuote: !!quote?.success
+      });
+
+      totalPremiumCollected += premiumTotal;
+    } else {
+      console.log(`[WHEEL METRICS] BOUGHT Position ${position.symbol} $${position.strike} - skipping from premium collected`);
+    }
     
     // Guard against failed quotes
     if (!quote?.success || !quote.quote) {

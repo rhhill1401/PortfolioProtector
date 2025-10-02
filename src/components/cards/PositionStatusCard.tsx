@@ -74,10 +74,15 @@ export function PositionStatusCard({ shareCount, positions, className = '' }: Po
 
   const positionSummary = summarySegments.join(' • ');
 
+  // Premium Collected = ONLY money received from SOLD positions (negative contracts)
+  // BOUGHT positions cost you money but are NOT "premium collected"
   const totalPremiumCollectedRaw = positions.reduce((total, pos) => {
-    const premiumValue = Number(pos.premium ?? pos.premiumCollected ?? 0);
-    const sign = pos.contracts < 0 ? 1 : -1;
-    return total + premiumValue * sign;
+    // Only count SOLD positions (negative contracts)
+    if (pos.contracts >= 0) return total;
+
+    // Use premiumCollected field preferentially, fall back to premium
+    const premiumValue = Math.abs(Number(pos.premiumCollected ?? pos.premium ?? 0));
+    return total + premiumValue;
   }, 0);
   const totalPremiumTone = totalPremiumCollectedRaw > 0
     ? 'text-green-600'

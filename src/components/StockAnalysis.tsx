@@ -802,8 +802,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 											<p className='text-xs text-gray-600'>Total Premium Collected</p>
 											<p className='text-xl font-bold text-gray-900'>
 												${Math.round(analysisData.wheelStrategy.currentPositions?.reduce((total, pos) => {
-													// Premium values are already total collected per position, not per share
-													const premiumValue = pos.premium || pos.premiumCollected || 0;
+													// Premium Collected = ONLY money from SOLD positions (negative contracts)
+													// BOUGHT positions cost you money but are NOT "premium collected"
+													if (pos.contracts >= 0) return total;
+
+													const premiumValue = Math.abs(pos.premiumCollected || pos.premium || 0);
 													return total + premiumValue;
 												}, 0)) || '0'}
 											</p>

@@ -212,6 +212,25 @@ Without `deno.json`, the bundler will hang during deployment
 - Ensure all changes meet the code review checklist
 - **NEVER** skip linting - it catches issues humans miss
 
+## Dynamic Ticker Selection Implementation (2025-10-01)
+**Goal**: Replace hardcoded IBIT/ETHA buttons with dynamic ticker buttons generated from portfolio upload
+**Approach**: Portfolio-driven (safer than free-form input - no typos, validation issues)
+**Status**: In progress - iterative implementation with code review between steps
+
+### Implementation Plan:
+1. Extract unique tickers from portfolio-vision response
+2. Generate dynamic ticker selection buttons
+3. Filter positions/strategies by selected ticker
+4. Remove hardcoded IBIT/ETHA conditionals
+5. Test with multi-ticker portfolios
+
+### Why Portfolio-Driven vs Input Field:
+- ✅ No typo errors (user can't type "IBTC" instead of "IBIT")
+- ✅ Automatic validation (only shows tickers in portfolio)
+- ✅ Better UX (clear what tickers are available)
+- ✅ Easier multi-ticker handling
+- ❌ Input field requires API validation, error handling, and more complexity
+
 ## Memories
 - Perfect what every you did to get that to work remember before we make our next tweeks
 

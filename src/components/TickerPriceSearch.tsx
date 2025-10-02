@@ -3,6 +3,7 @@ import {useState, useEffect, useCallback} from 'react';
 import {Button} from '@/components/ui/button';
 import {Loader2} from 'lucide-react';
 import {Tabs, TabsList, TabsTrigger, TabsContent} from '@/components/ui/tabs';
+import {Skeleton} from '@/components/ui/skeleton';
 import UploadStatusTracker from '@/components/UploadStatusTracker';
 import UploadTab from '@/components/UploadTab';
 import {PortfolioCSVParser} from '@/utils/portfolioParser';
@@ -331,7 +332,7 @@ interface ProcessedChartData {
 
 
 type AnalysisPanelProps = {
-	eodData: MarketstackEodData;
+	eodData: MarketstackEodData | null;
 	readiness: AnalysisReadiness;
 	isAnalyzing: boolean;
 	handleAIAnalysis: () => void | Promise<void>;
@@ -343,6 +344,8 @@ type AnalysisPanelProps = {
 	handleResearchUpload: (files: FileList) => void;
 	df: (d?: string | null) => string;
 	nf: (v: number | null) => string;
+	chartsEnabled: boolean;
+	researchEnabled: boolean;
 };
 
 function AnalysisPanel({
@@ -358,119 +361,134 @@ function AnalysisPanel({
 	handleResearchUpload,
 	df,
 	nf,
+	chartsEnabled,
+	researchEnabled,
 }: AnalysisPanelProps) {
 	return (
 		<div>
-			<div className='bg-[#8079e3] p-4 border-b border-[#6c68b8] flex justify-between'>
-				<h2 className='text-2xl font-bold'>
-					{eodData.symbol === 'IBIT,ETHA' ? 'IBIT & ETHA' : eodData.symbol}
-				</h2>
-				<span className='text-2xl font-bold'>
-					{eodData.symbol === 'IBIT,ETHA' ? 'Combined Analysis' : `$${nf(eodData.close)}`}
-				</span>
-			</div>
+			{eodData && (
+				<>
+					<div className='bg-[#8079e3] p-4 border-b border-[#6c68b8] flex justify-between'>
+						<h2 className='text-2xl font-bold'>
+							{eodData.symbol === 'IBIT,ETHA' ? 'IBIT & ETHA' : eodData.symbol}
+						</h2>
+						<span className='text-2xl font-bold'>
+							{eodData.symbol === 'IBIT,ETHA' ? 'Combined Analysis' : `$${nf(eodData.close)}`}
+						</span>
+					</div>
 
-			<div className='p-4'>
-				{eodData.symbol !== 'IBIT,ETHA' && (
-					<div className='grid grid-cols-2 gap-3'>
-						{[
-							['Open', eodData.open],
-							['High', eodData.high],
-							['Low', eodData.low],
-						].map(([lbl, val]) => (
-							<div key={lbl} className='bg-[#8079e3] p-3 rounded flex flex-col'>
-								<span className='text-xs text-white/70'>{lbl}</span>
-								<span className='font-medium'>${nf(val as number | null)}</span>
+					<div className='p-4'>
+						{eodData.symbol !== 'IBIT,ETHA' && (
+							<div className='grid grid-cols-2 gap-3'>
+								{[
+									['Open', eodData.open],
+									['High', eodData.high],
+									['Low', eodData.low],
+								].map(([lbl, val]) => (
+									<div key={lbl} className='bg-[#8079e3] p-3 rounded flex flex-col'>
+										<span className='text-xs text-white/70'>{lbl}</span>
+										<span className='font-medium'>${nf(val as number | null)}</span>
+									</div>
+								))}
+								<div className='bg-[#8079e3] p-3 rounded col-span-2'>
+									<span className='text-xs text-white/70'>Volume</span>
+									<span className='font-medium'>
+										{eodData.volume?.toLocaleString() ?? 'N/A'}
+									</span>
+								</div>
 							</div>
-						))}
-						<div className='bg-[#8079e3] p-3 rounded col-span-2'>
-							<span className='text-xs text-white/70'>Volume</span>
-							<span className='font-medium'>
-								{eodData.volume?.toLocaleString() ?? 'N/A'}
-							</span>
+						)}
+
+						<div className='mt-4 space-y-4'>
+							<UploadStatusTracker readiness={readiness} uploadState={uploadState} />
+
+							<Button
+								disabled={!readiness.allRequirementsMet || isAnalyzing}
+								onClick={handleAIAnalysis}
+								className={`w-full font-semibold py-3 px-4 rounded-lg shadow-md inline-flex items-center gap-2 transition-all ${
+									readiness.allRequirementsMet
+										? 'bg-[#88FC8F] hover:bg-[#7AE881] text-gray-800'
+										: 'bg-gray-500 text-gray-300 cursor-not-allowed'
+								}`}
+							>
+								{isAnalyzing ? (
+									<>
+										<Loader2 className='h-4 w-4 animate-spin' />
+										Building…
+									</>
+								) : (
+									<>
+										🤖 Generate AI Analysis
+										{!readiness.allRequirementsMet && (
+											<span className='text-xs ml-2'>
+												(
+												{
+													Object.entries(readiness).filter(
+														([k, v]) => k !== 'allRequirementsMet' && !v
+													).length
+												}{' '}
+												requirements missing)
+											</span>
+										)}
+									</>
+								)}
+							</Button>
+							<span className='text-xs text-white/70'>Last updated: {df(eodData.date)}</span>
 						</div>
 					</div>
-				)}
+				</>
+			)}
 
-				<div className='mt-4 space-y-4'>
-					<UploadStatusTracker readiness={readiness} uploadState={uploadState} />
+			<div className='p-4'>
+				<Tabs defaultValue='portfolio' className='w-full'>
+					<TabsList className='grid w-full grid-cols-3 bg-[#766DFB] rounded-2xl p-1'>
+						<TabsTrigger value='portfolio' className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
+							Portfolio {uploadState.portfolio.files.length > 0 && `(${uploadState.portfolio.files.length})`}
+						</TabsTrigger>
+						<TabsTrigger
+							value='charts'
+							disabled={!chartsEnabled}
+							className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2 disabled:opacity-50 disabled:cursor-not-allowed'
+						>
+							Charts {uploadState.charts.files.length > 0 && `(${uploadState.charts.files.length})`}
+						</TabsTrigger>
+						<TabsTrigger
+							value='research'
+							disabled={!researchEnabled}
+							className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2 disabled:opacity-50 disabled:cursor-not-allowed'
+						>
+							Deep research {uploadState.research.files.length > 0 && `(${uploadState.research.files.length})`}
+						</TabsTrigger>
+					</TabsList>
 
-					<Button
-						disabled={!readiness.allRequirementsMet || isAnalyzing}
-						onClick={handleAIAnalysis}
-						className={`w-full font-semibold py-3 px-4 rounded-lg shadow-md inline-flex items-center gap-2 transition-all ${
-							readiness.allRequirementsMet
-								? 'bg-[#88FC8F] hover:bg-[#7AE881] text-gray-800'
-								: 'bg-gray-500 text-gray-300 cursor-not-allowed'
-						}`}
-					>
-						{isAnalyzing ? (
-							<>
-								<Loader2 className='h-4 w-4 animate-spin' />
-								Building…
-							</>
-						) : (
-							<>
-								🤖 Generate AI Analysis
-								{!readiness.allRequirementsMet && (
-									<span className='text-xs ml-2'>
-										(
-										{
-											Object.entries(readiness).filter(
-												([k, v]) => k !== 'allRequirementsMet' && !v
-											).length
-										}{' '}
-										requirements missing)
-									</span>
-								)}
-							</>
+					<TabsContent value='portfolio' className='mt-4'>
+						<UploadTab id='portfolio-files' accept='image/*,.csv,.xlsx' multiple onFiles={handlePortfolioUpload} />
+						{isParsingPortfolio && (
+							<div className='mt-2 text-sm text-white/70 flex items-center gap-2'>
+								<Loader2 className='h-3 w-3 animate-spin' />
+								Parsing CSV files…
+							</div>
 						)}
-					</Button>
+						{parsedPortfolio && (
+							<div className='mt-2 text-sm text-white/90'>
+								✓ Parsed {parsedPortfolio.positions.length} positions
+							</div>
+						)}
+					</TabsContent>
 
-					<Tabs defaultValue='portfolio' className='w-full'>
-						<TabsList className='grid w-full grid-cols-3 bg-[#766DFB] rounded-2xl p-1'>
-							<TabsTrigger value='portfolio' className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
-								Portfolio {uploadState.portfolio.files.length > 0 && `(${uploadState.portfolio.files.length})`}
-							</TabsTrigger>
-							<TabsTrigger value='charts' className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
-								Charts {uploadState.charts.files.length > 0 && `(${uploadState.charts.files.length})`}
-							</TabsTrigger>
-							<TabsTrigger value='research' className='data-[state=active]:bg-[#050136] data-[state=active]:text-white data-[state=active]:font-semibold text-white rounded-xl py-2'>
-								Deep research {uploadState.research.files.length > 0 && `(${uploadState.research.files.length})`}
-							</TabsTrigger>
-						</TabsList>
+					<TabsContent value='charts' className='mt-4'>
+						<UploadTab id='chart-images' accept='image/*' multiple onFiles={handleChartsUpload} />
+					</TabsContent>
 
-						<TabsContent value='portfolio' className='mt-4'>
-							<UploadTab id='portfolio-files' accept='image/*,.csv,.xlsx' multiple onFiles={handlePortfolioUpload} />
-							{isParsingPortfolio && (
-								<div className='mt-2 text-sm text-white/70 flex items-center gap-2'>
-									<Loader2 className='h-3 w-3 animate-spin' />
-									Parsing CSV files…
-								</div>
-							)}
-							{parsedPortfolio && (
-								<div className='mt-2 text-sm text-white/90'>
-									✓ Parsed {parsedPortfolio.positions.length} positions
-								</div>
-							)}
-						</TabsContent>
-
-						<TabsContent value='charts' className='mt-4'>
-							<UploadTab id='chart-images' accept='image/*' multiple onFiles={handleChartsUpload} />
-						</TabsContent>
-
-						<TabsContent value='research' className='mt-4'>
-							<UploadTab
-								id='research-files'
-								accept='.pdf,.doc,.docx,.txt,.rtf,.md,.csv,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword'
-								multiple
-								onFiles={handleResearchUpload}
-							/>
-						</TabsContent>
-					</Tabs>
-
-					<span className='text-xs text-white/70'>Last updated: {df(eodData.date)}</span>
-				</div>
+					<TabsContent value='research' className='mt-4'>
+						<UploadTab
+							id='research-files'
+							accept='.pdf,.doc,.docx,.txt,.rtf,.md,.csv,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword'
+							multiple
+							onFiles={handleResearchUpload}
+						/>
+					</TabsContent>
+				</Tabs>
 			</div>
 		</div>
 	);
@@ -492,12 +510,14 @@ export function TickerPriceSearch({
 		useState<AnalysisReadiness>(initialReadiness);
 
     // Update readiness whenever upload state or ticker changes
+    // Charts and research are now OPTIONAL - only portfolio + ticker required
     useEffect(() => {
         const tickerValid = !!eodData && !!eodData.symbol;
         const portfolioReady = uploadState.portfolio.status === 'ready';
         const chartsReady = uploadState.charts.status === 'ready';
         const researchReady = uploadState.research.status === 'ready';
-        const allRequirementsMet = tickerValid && portfolioReady && chartsReady && researchReady;
+        // Only require portfolio + ticker (charts/research optional)
+        const allRequirementsMet = tickerValid && portfolioReady;
         setReadiness({ tickerValid, portfolioReady, chartsReady, researchReady, allRequirementsMet });
     }, [uploadState, eodData]);
 
@@ -527,6 +547,52 @@ export function TickerPriceSearch({
 	const [parsedPortfolio, setParsedPortfolio] =
 		useState<PortfolioParseResult | null>(null);
 	const [isParsingPortfolio, setIsParsingPortfolio] = useState(false);
+	// NEW: Available tickers extracted from portfolio
+	const [availableTickers, setAvailableTickers] = useState<string[]>([]);
+	// NEW: Tab enablement state (charts/research disabled until ticker selected)
+	const [chartsEnabled, setChartsEnabled] = useState(false);
+	const [researchEnabled, setResearchEnabled] = useState(false);
+
+	// Load cached portfolio data from sessionStorage on mount
+	useEffect(() => {
+		const cached = sessionStorage.getItem('portfolioData');
+		if (cached) {
+			try {
+				const data: PortfolioParseResult = JSON.parse(cached);
+				setParsedPortfolio(data);
+				console.log('📦 [CACHE] Loaded portfolio from sessionStorage:', {
+					positions: data.positions.length,
+					totalValue: data.totalValue
+				});
+
+				// Extract tickers from cached data
+				const tickers = new Set<string>();
+				data.positions.forEach(pos => {
+					if (pos.symbol) tickers.add(pos.symbol.toUpperCase());
+				});
+				if (data?.metadata?.optionPositions) {
+					const optionPositions = data.metadata.optionPositions as OptionPosition[];
+					optionPositions.forEach(pos => {
+						if (pos.symbol) {
+							const normalized = pos.symbol.toUpperCase().replace(/^O:/, '');
+							tickers.add(normalized);
+						}
+					});
+				}
+				const extractedTickers = Array.from(tickers).sort();
+				setAvailableTickers(extractedTickers);
+
+				// Mark portfolio as ready
+				setUploadState(prev => ({
+					...prev,
+					portfolio: { ...prev.portfolio, status: 'ready' }
+				}));
+			} catch (err) {
+				console.error('❌ [CACHE] Failed to load cached portfolio:', err);
+				sessionStorage.removeItem('portfolioData');
+			}
+		}
+	}, []);
     // Option Greeks state
     const [optionGreeks, setOptionGreeks] = useState<Map<string, OptionQuote>>(new Map());
     const [, setIsFetchingGreeks] = useState(false);
@@ -718,6 +784,40 @@ export function TickerPriceSearch({
                 source: portfolioResult.metadata?.source || 'csv'
             });
 
+            // Extract unique tickers from positions and option positions
+            const tickers = new Set<string>();
+
+            // From regular positions
+            portfolioResult.positions.forEach(pos => {
+                if (pos.symbol) {
+                    tickers.add(pos.symbol.toUpperCase());
+                }
+            });
+
+            // From option positions
+            if (portfolioResult?.metadata?.optionPositions) {
+                const optionPositions = portfolioResult.metadata.optionPositions as OptionPosition[];
+                optionPositions.forEach(pos => {
+                    if (pos.symbol) {
+                        // Normalize option symbols (remove O: prefix if present)
+                        const normalized = pos.symbol.toUpperCase().replace(/^O:/, '');
+                        tickers.add(normalized);
+                    }
+                });
+            }
+
+            const extractedTickers = Array.from(tickers).sort();
+            setAvailableTickers(extractedTickers);
+            console.log('🎯 [TICKER EXTRACTION] Available tickers:', extractedTickers);
+
+            // Cache portfolio data in sessionStorage
+            try {
+                sessionStorage.setItem('portfolioData', JSON.stringify(portfolioResult));
+                console.log('💾 [CACHE] Saved portfolio to sessionStorage');
+            } catch (err) {
+                console.error('❌ [CACHE] Failed to save portfolio to sessionStorage:', err);
+            }
+
             if (
                 portfolioResult?.metadata?.optionPositions &&
                 portfolioResult.metadata.optionPositions.length > 0
@@ -741,6 +841,7 @@ export function TickerPriceSearch({
             }
         } else {
             console.log('❌ [PORTFOLIO UPLOAD] No portfolio data extracted from any files');
+            setAvailableTickers([]);
         }
     };
 
@@ -975,6 +1076,10 @@ export function TickerPriceSearch({
 
 	// Enhanced upload handlers - handle both CSV and image files
     const handlePortfolioUpload = async (files: FileList) => {
+        // Clear cached portfolio data when user explicitly uploads new files
+        sessionStorage.removeItem('portfolioData');
+        console.log('🗑️ [CACHE] Cleared cached portfolio - processing new upload');
+
         updateUploadState('portfolio', files);
 
         setIsParsingPortfolio(true);
@@ -1260,6 +1365,10 @@ export function TickerPriceSearch({
 			const latest = j.data[0];
 			setEodData(latest);
 
+			// Enable charts and research tabs after successful price data fetch
+			setChartsEnabled(true);
+			setResearchEnabled(true);
+
 			/* broadcast to StockAnalysis */
 			window.dispatchEvent(
 				new CustomEvent<PriceInfo>('price-update', {
@@ -1335,39 +1444,45 @@ export function TickerPriceSearch({
 		<div className='h-full w-full'>
 			<div className='rounded-lg overflow-hidden shadow-md bg-[#9089FC] border border-[#7c77d1] h-full flex flex-col'>
 				<div className='bg-[#7c77d1] px-4 py-4 border-b border-[#6c68b8]'>
-					<h2 className='text-lg font-semibold mb-2 text-white'>Select ETF</h2>
-					<div className='flex gap-2'>
-						<button
-							onClick={() => onTickerChange('IBIT')}
-							className={`flex-1 py-2 px-3 rounded-md font-medium transition-all ${
-								tickerSymbol === 'IBIT'
-									? 'bg-[#766DFB] text-white'
-									: 'bg-white/20 text-white/70 hover:bg-white/30'
-							}`}
-						>
-							IBIT
-						</button>
-						<button
-							onClick={() => onTickerChange('ETHA')}
-							className={`flex-1 py-2 px-3 rounded-md font-medium transition-all ${
-								tickerSymbol === 'ETHA'
-									? 'bg-[#766DFB] text-white'
-									: 'bg-white/20 text-white/70 hover:bg-white/30'
-							}`}
-						>
-							ETHA
-						</button>
-						<button
-							onClick={() => onTickerChange('IBIT,ETHA')}
-							className={`flex-1 py-2 px-3 rounded-md font-medium transition-all ${
-								tickerSymbol === 'IBIT,ETHA'
-									? 'bg-[#766DFB] text-white'
-									: 'bg-white/20 text-white/70 hover:bg-white/30'
-							}`}
-						>
-							BOTH
-						</button>
-					</div>
+					<h2 className='text-lg font-semibold mb-2 text-white'>
+						{isParsingPortfolio ? 'Processing Portfolio...' : availableTickers.length > 0 ? 'Select Ticker' : 'Upload Portfolio'}
+					</h2>
+					{isParsingPortfolio && (
+						<div className='flex flex-wrap gap-2'>
+							<Skeleton className='h-10 w-20' />
+							<Skeleton className='h-10 w-20' />
+							<Skeleton className='h-10 w-20' />
+						</div>
+					)}
+					{!isParsingPortfolio && availableTickers.length > 0 && (
+						<div className='flex flex-wrap gap-2'>
+							{availableTickers.map(ticker => (
+								<button
+									key={ticker}
+									onClick={() => onTickerChange(ticker)}
+									className={`py-2 px-4 rounded-md font-medium transition-all ${
+										tickerSymbol === ticker
+											? 'bg-[#766DFB] text-white'
+											: 'bg-white/20 text-white/70 hover:bg-white/30'
+									}`}
+								>
+									{ticker}
+								</button>
+							))}
+							{availableTickers.length > 1 && (
+								<button
+									onClick={() => onTickerChange(availableTickers.join(','))}
+									className={`py-2 px-4 rounded-md font-medium transition-all ${
+										tickerSymbol === availableTickers.join(',')
+											? 'bg-[#766DFB] text-white'
+											: 'bg-white/20 text-white/70 hover:bg-white/30'
+									}`}
+								>
+									ALL
+								</button>
+							)}
+						</div>
+					)}
 					{!apiKey && <p className='text-xs text-yellow-200 mt-2'>⚠️ Configure VITE_MARKETSTACK_API_KEY</p>}
 				</div>
 
@@ -1380,7 +1495,7 @@ export function TickerPriceSearch({
 						<div className='flex items-center justify-center h-64 text-center'>
 							<p className='font-medium text-red-200'>{error}</p>
 						</div>
-					) : eodData ? (
+					) : (
 						<AnalysisPanel
 							eodData={eodData}
 							readiness={readiness}
@@ -1394,11 +1509,9 @@ export function TickerPriceSearch({
 							handleResearchUpload={handleResearchUpload}
 							df={df}
 							nf={nf}
+							chartsEnabled={chartsEnabled}
+							researchEnabled={researchEnabled}
 						/>
-					) : (
-						<div className='flex items-center justify-center h-64'>
-							<p>Enter a ticker to view data.</p>
-						</div>
 					)}
 				</div>
 			</div>

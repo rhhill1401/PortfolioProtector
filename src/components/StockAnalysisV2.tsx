@@ -514,6 +514,24 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 	console.log('🔄 [WHEEL POSITIONS] Formatted for API:', wheelPositions);
 	const { quotes: wheelQuotes } = useWheelQuotes(wheelPositions);
 
+	// Calculate assignment probability from first position's delta (Greeks)
+	const assignmentProbability = useMemo(() => {
+		if (!wheelQuotes || wheelQuotes.length === 0) return null;
+
+		// Get first successful quote with delta
+		const firstQuote = wheelQuotes.find(q => q.success && q.quote?.delta !== null);
+		if (!firstQuote || !firstQuote.quote) return null;
+
+		// Assignment probability ≈ |delta| * 100 for short options
+		// For calls: high delta (close to 1.0) = high assignment risk
+		const delta = firstQuote.quote.delta;
+		if (delta === null) return null;
+
+		const probability = Math.abs(delta) * 100;
+		console.log('📊 [ASSIGNMENT RISK] Calculated from delta:', { delta, probability });
+		return Math.round(probability);
+	}, [wheelQuotes]);
+
 	const displayData = analysisData
 		? {
 				...analysisData,
@@ -717,6 +735,7 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 					? closes.reverse().find((v) => v != null)
 					: null;
 				if (typeof last === 'number') {
+					console.log('📊 [VIX] Fetched from Yahoo Finance:', last);
 					setVix(last);
 				} else {
 					throw new Error('Yahoo close not found');
@@ -733,9 +752,10 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 						const parts = csv.trim().split(',');
 						const close = parseFloat(parts[5]);
 						if (!isNaN(close)) {
+							console.log('📊 [VIX] Fetched from Stooq (fallback):', close);
 							setVix(close);
 						} else {
-							console.warn('VIX fallback parse failed', csv);
+							console.warn('📊 [VIX] Fallback parse failed', csv);
 							setVix(null);
 						}
 					})
@@ -808,11 +828,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 							/>
 
 							<IVEnvironmentCard
-								vix={analysisData.vix}
+								vix={vix}
 							/>
 
 							<AssignmentRiskCard
-								assignmentProb={analysisData.wheelStrategy.currentPositions?.[0]?.assignmentProb}
+								assignmentProb={assignmentProbability}
 							/>
 						</div>
 					)}

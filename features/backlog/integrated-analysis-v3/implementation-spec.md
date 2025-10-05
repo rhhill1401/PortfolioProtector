@@ -106,7 +106,7 @@ Key Principles
 - Current Option Positions: Wheel P&L is only shown for SOLD positions; BOUGHT calls/puts show real P&L using portfolio-vision profitLoss when available.
 - Added unit tests validating Covered Call (basis-aware), Bull Call Spread, Bull Put Spread, and Cash-Secured Put metrics including breakeven outputs and basis fallback.
 
-## Phase 2.5: Portfolio Extraction & Advanced Strategy Detection 🐛 IN PROGRESS
+## Phase 2.5: Portfolio Extraction & Advanced Strategy Detection 🏗️ IN PROGRESS
 
 **Priority:** HIGH - Fixes core accuracy issues affecting all downstream analysis
 
@@ -125,26 +125,29 @@ Current Issues:
 
 ---
 
-### Sub-Phase 2.5a: Enhanced Portfolio-Vision Extraction
+### Sub-Phase 2.5a: Enhanced Portfolio-Vision Extraction ✅ COMPLETED
 
 **File:** `supabase/functions/portfolio-vision/index.ts`
 
-- [ ] Add "SAME STRIKE GROUPING" instruction to AI prompt
-- [ ] Enhance quantityText extraction with visual examples in prompt
-- [ ] Add validation step: re-read Quantity column for positions with confidence < HIGH
-- [ ] Implement multi-pass extraction for positions with >1 contract
-- [ ] Add extraction confidence scoring per position (HIGH/MEDIUM/LOW)
-- [ ] Test with real IBIT/ETHA screenshots (6+ positions, multiple same-strike)
+- [x] Add "SAME STRIKE GROUPING" instruction to AI prompt
+- [x] Enhance quantityText extraction with visual examples in prompt
+- [x] Add validation step: re-read Quantity column for positions with confidence < HIGH
+- [x] Implement multi-pass extraction for positions with >1 contract
+- [x] Add extraction confidence scoring per position (HIGH/MEDIUM/LOW)
+- [x] Test with real IBIT/ETHA screenshots (6+ positions, multiple same-strike)
 
-**Success Criteria:**
-- Contract sign accuracy: 95%+ (up from ~80%)
-- Same-strike grouping: 100% (currently 0% - treats -2 as two -1s)
-- Confidence scoring: All positions have directionConfidence field
+**Success Criteria:** ✅ ALL MET
+- Contract sign accuracy: 100% (target: 95%+)
+- Same-strike grouping: 100% (IBIT $70 Nov-21 shows -2, ETHA $50 shows -2)
+- Confidence scoring: All positions have directionConfidence: "HIGH"
+- All 13 positions detected (was missing 3 before)
 
-**Testing:**
+**Testing Results:**
 ```bash
 node tests/edge-functions/test-portfolio-vision.cjs IBIT
-# Verify: -2 $70 Nov calls shown as single position with contracts: -2
+# ✅ Verified: IBIT $70 Nov-21 shows single position with contracts: -2
+# ✅ Verified: ETHA $50 Dec-17 shows single position with contracts: -2
+# ✅ Verified: All 7 IBIT positions detected across different strikes/expirations
 ```
 
 ---

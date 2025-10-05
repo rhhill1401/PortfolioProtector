@@ -28,8 +28,8 @@ interface OptionPosition {
   term?: string;
   quantityText?: string;
   positionText?: string;
-  directionConfidence?: 'HIGH' | 'LOW';
-  signSource?: 'quantityText' | 'model';
+  directionConfidence?: "HIGH" | "MEDIUM" | "LOW";
+  signSource?: "quantityText" | "model";
   [key: string]: unknown;
 }
 
@@ -72,7 +72,8 @@ const PORTFOLIO_TOOL = [{
   type: "function",
   function: {
     name: "extract_portfolio",
-    description: "Extract portfolio (cash, stocks, options) from a brokerage screenshot.",
+    description:
+      "Extract portfolio (cash, stocks, options) from a brokerage screenshot.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -90,10 +91,10 @@ const PORTFOLIO_TOOL = [{
               quantity: { type: "number" },
               purchasePrice: { type: "number" },
               currentPrice: { type: "number" },
-              marketValue: { type: "number" }
+              marketValue: { type: "number" },
             },
-            required: ["symbol","quantity","currentPrice","marketValue"]
-          }
+            required: ["symbol", "quantity", "currentPrice", "marketValue"],
+          },
         },
         metadata: {
           type: "object",
@@ -106,55 +107,73 @@ const PORTFOLIO_TOOL = [{
                 additionalProperties: true,
                 properties: {
                   symbol: { type: "string" },
-                  optionType: { type: "string", enum: ["CALL","PUT"] },
+                  optionType: { type: "string", enum: ["CALL", "PUT"] },
                   strike: { type: "number" },
                   expiry: { type: "string" },
                   contracts: { type: "number" },
                   quantityText: { type: "string" },
-                  position: { type: "string", enum: ["SHORT","LONG"] },
+                  directionConfidence: {
+                    type: "string",
+                    enum: ["HIGH", "MEDIUM", "LOW"],
+                  },
+                  position: { type: "string", enum: ["SHORT", "LONG"] },
                   premium: { type: "number" },
                   premiumCollected: { type: "number" },
                   currentValue: { type: "number" },
                   profitLoss: { type: "number" },
                   daysToExpiry: { type: "number" },
-                  term: { type: "string", enum: ["LONG_DATED","SHORT_DATED"] }
+                  term: { type: "string", enum: ["LONG_DATED", "SHORT_DATED"] },
                 },
-                required: ["symbol","optionType","strike","expiry","contracts"]
-              }
-            }
-          }
+                required: [
+                  "symbol",
+                  "optionType",
+                  "strike",
+                  "expiry",
+                  "contracts",
+                ],
+              },
+            },
+          },
         },
         totalValue: { type: "number" },
         extractionConfidence: { type: "string" },
-        extractionNotes: { type: "string" }
+        extractionNotes: { type: "string" },
       },
-      required: ["portfolioDetected","metadata"]
-    }
-  }
+      required: ["portfolioDetected", "metadata"],
+    },
+  },
 }];
 
 /* ---------------- JSON repair helpers ---------------- */
 const stripFences = (s: string) =>
-  s.replace(/```(?:json)?/gi, "```").replace(/^.*?```/s, "").replace(/```.*$/s, "").trim();
+  s.replace(/```(?:json)?/gi, "```").replace(/^.*?```/s, "").replace(
+    /```.*$/s,
+    "",
+  ).trim();
 
 const sliceToBraces = (s: string) => {
   const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  return (a >= 0 && b > a) ? s.slice(a, b+1) : s;
+  return (a >= 0 && b > a) ? s.slice(a, b + 1) : s;
 };
 
 function repairJson(txt: string) {
   let s = stripFences(txt);
   s = sliceToBraces(s);
-  s = s.replace(/,(\s*[}\]])/g, "$1");                 // trailing commas
-  s = s.replace(/[\u0000-\u001F](?!\n|\r|\t)/g, "");   // stray controls
+  s = s.replace(/,(\s*[}\]])/g, "$1"); // trailing commas
+  // eslint-disable-next-line no-control-regex
+  s = s.replace(/[\u0000-\u001F](?!\n|\r|\t)/g, ""); // stray controls
   return s;
 }
 
 async function parseWithRetry(raw: string, tries = 2) {
   let last: unknown;
   for (let i = 0; i < tries; i++) {
-    try { return JSON.parse(repairJson(raw)); }
-    catch (e) { last = e; await new Promise(r => setTimeout(r, 200*(i+1))); }
+    try {
+      return JSON.parse(repairJson(raw));
+    } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+    }
   }
   throw last;
 }
@@ -201,7 +220,9 @@ const buildDefaultPortfolio = (notes: string): PortfolioResult => ({
   extractionNotes: notes,
 });
 
-const enrichOptionPositions = (positions: OptionPosition[] | undefined): OptionPosition[] | undefined => {
+const enrichOptionPositions = (
+  positions: OptionPosition[] | undefined,
+): OptionPosition[] | undefined => {
   if (!Array.isArray(positions)) return positions;
 
   const today = new Date();
@@ -218,22 +239,29 @@ const enrichOptionPositions = (positions: OptionPosition[] | undefined): OptionP
           daysToExpiry = Math.max(0, Math.ceil(diff / 86_400_000));
         }
       } catch (dateErr) {
-        console.warn(`⚠️ [PORTFOLIO VISION] Date parsing error for ${opt.expiry}:`, dateErr);
+        console.warn(
+          `⚠️ [PORTFOLIO VISION] Date parsing error for ${opt.expiry}:`,
+          dateErr,
+        );
       }
     }
 
-    const rawQuantityText = typeof opt.quantityText === "string" ? opt.quantityText.trim() : "";
+    const rawQuantityText = typeof opt.quantityText === "string"
+      ? opt.quantityText.trim()
+      : "";
     const quantityParse = parseContractsFromQuantityText(rawQuantityText);
     const parsedContracts = parseContractCount(opt.contracts);
     const rawContracts = typeof opt.contracts === "number" ? opt.contracts : 0;
-    const rawPosition = typeof opt.position === "string" ? opt.position.toUpperCase() : undefined;
+    const rawPosition = typeof opt.position === "string"
+      ? opt.position.toUpperCase()
+      : undefined;
 
     let contracts = parsedContracts ?? rawContracts;
-    let signSource: 'quantityText' | 'model' = 'model';
-    let directionConfidence: 'HIGH' | 'LOW' = 'LOW';
+    let signSource: "quantityText" | "model" = "model";
+    let directionConfidence: "HIGH" | "MEDIUM" | "LOW" = "LOW";
 
     if (quantityParse.contracts !== null) {
-      signSource = 'quantityText';
+      signSource = "quantityText";
       directionConfidence = quantityParse.confidence;
       if (contracts !== quantityParse.contracts) {
         correctedSigns += 1;
@@ -243,20 +271,23 @@ const enrichOptionPositions = (positions: OptionPosition[] | undefined): OptionP
       if (!rawQuantityText) {
         missingQuantityText += 1;
       }
-      directionConfidence = 'LOW';
-      if (rawPosition === 'SHORT' && contracts > 0) {
+      directionConfidence = "LOW";
+      if (rawPosition === "SHORT" && contracts > 0) {
         contracts = -Math.abs(contracts);
-      } else if (rawPosition === 'LONG' && contracts < 0) {
+      } else if (rawPosition === "LONG" && contracts < 0) {
         contracts = Math.abs(contracts);
       }
     }
 
-    const normalizedPosition = contracts < 0 ? 'SHORT' : 'LONG';
+    const normalizedPosition = contracts < 0 ? "SHORT" : "LONG";
 
     return {
       ...opt,
-      quantityText: quantityParse.normalizedText || rawQuantityText || undefined,
-      positionText: typeof opt.positionText === "string" ? opt.positionText : undefined,
+      quantityText: quantityParse.normalizedText || rawQuantityText ||
+        undefined,
+      positionText: typeof opt.positionText === "string"
+        ? opt.positionText
+        : undefined,
       contracts,
       daysToExpiry,
       term: daysToExpiry > 365 ? "LONG_DATED" : "SHORT_DATED",
@@ -267,7 +298,9 @@ const enrichOptionPositions = (positions: OptionPosition[] | undefined): OptionP
   });
 
   if (normalized.length > 0) {
-    console.log(`ℹ️ [PORTFOLIO VISION] Quantity sign enforcement: corrected ${correctedSigns}/${normalized.length} legs; missing quantityText: ${missingQuantityText}`);
+    console.log(
+      `ℹ️ [PORTFOLIO VISION] Quantity sign enforcement: corrected ${correctedSigns}/${normalized.length} legs; missing quantityText: ${missingQuantityText}`,
+    );
   }
 
   return normalized;
@@ -284,18 +317,27 @@ const logPortfolioSummary = (portfolio: PortfolioResult): void => {
     brokerageType: portfolio.brokerageType,
   });
 
-  console.log('🔍 [PORTFOLIO VISION] EXACT RESPONSE STRUCTURE:', JSON.stringify({
-    success: true,
-    portfolio,
-  }, null, 2));
+  console.log(
+    "🔍 [PORTFOLIO VISION] EXACT RESPONSE STRUCTURE:",
+    JSON.stringify(
+      {
+        success: true,
+        portfolio,
+      },
+      null,
+      2,
+    ),
+  );
 
   if (Array.isArray(portfolio.positions) && portfolio.positions.length > 0) {
     console.log(`📈 [POSITIONS EXTRACTED]:`, portfolio.positions);
     portfolio.positions.forEach((pos, index) => {
-      const symbol = (pos.symbol as string | undefined) ?? 'Unknown';
-      const quantity = pos.quantity ?? 'Unknown';
-      const price = pos.currentPrice ?? 'Unknown';
-      console.log(`   Stock ${index + 1}: ${symbol} - ${quantity} shares @ $${price}`);
+      const symbol = (pos.symbol as string | undefined) ?? "Unknown";
+      const quantity = pos.quantity ?? "Unknown";
+      const price = pos.currentPrice ?? "Unknown";
+      console.log(
+        `   Stock ${index + 1}: ${symbol} - ${quantity} shares @ $${price}`,
+      );
     });
   }
 
@@ -303,16 +345,26 @@ const logPortfolioSummary = (portfolio: PortfolioResult): void => {
   if (Array.isArray(optionPositions) && optionPositions.length > 0) {
     console.log(`📊 [OPTION POSITIONS EXTRACTED]:`, optionPositions);
     optionPositions.forEach((pos, index) => {
-      console.log(`   Option ${index + 1}: ${pos.symbol} $${pos.strike}${pos.optionType} ${pos.expiry} - ${pos.contracts} contracts (${pos.position}) DTE: ${pos.daysToExpiry ?? 'N/A'} P&L: $${pos.profitLoss ?? 'N/A'}`);
+      console.log(
+        `   Option ${
+          index + 1
+        }: ${pos.symbol} $${pos.strike}${pos.optionType} ${pos.expiry} - ${pos.contracts} contracts (${pos.position}) DTE: ${
+          pos.daysToExpiry ?? "N/A"
+        } P&L: $${pos.profitLoss ?? "N/A"}`,
+      );
     });
   }
 
-  if (!(portfolio.positions?.length) && !(portfolio.metadata?.optionPositions?.length)) {
+  if (
+    !(portfolio.positions?.length) &&
+    !(portfolio.metadata?.optionPositions?.length)
+  ) {
     console.log(`❌ [PORTFOLIO VISION] No positions extracted from image`);
   }
 };
 
-const SYSTEM_PROMPT = `You are a financial data extraction specialist analyzing portfolio screenshots.
+const SYSTEM_PROMPT =
+  `You are a financial data extraction specialist analyzing portfolio screenshots.
 
 HARD REQUIREMENTS:
 - You MUST return data by CALLING the function "extract_portfolio". Do not write prose.
@@ -352,6 +404,7 @@ Your response must be valid JSON matching this EXACT structure:
         "contracts": -1,
         "position": "SHORT",
         "quantityText": "-1 M",
+        "directionConfidence": "HIGH",
         "positionText": "Short",
         "premiumCollected": 350,
         "currentValue": 200,
@@ -368,6 +421,7 @@ Your response must be valid JSON matching this EXACT structure:
         "contracts": 2,
         "position": "LONG",
         "quantityText": "2 M",
+        "directionConfidence": "HIGH",
         "positionText": "Long",
         "premium": 800,
         "currentValue": 1200,
@@ -389,7 +443,8 @@ IMPORTANT:
 - Extract ALL positions visible, not just the target ticker
 - Response MUST be valid JSON only - no text before or after`;
 
-const buildUserPrompt = (ticker: string) => `Extract all portfolio position data from this image with SPECIAL FOCUS ON CASH AND OPTIONS.
+const buildUserPrompt = (ticker: string) =>
+  `Extract all portfolio position data from this image with SPECIAL FOCUS ON CASH AND OPTIONS.
 
 PRIMARY FOCUS: Look for ${ticker} positions (both stocks AND options), but extract ALL visible positions.
 
@@ -417,12 +472,49 @@ ALSO look for stock positions (extract into main "positions" array):
 - Gain/loss percentages
 
 OPTION POSITION RULES - CRITICAL:
-- SOLD options (you wrote/sold): the Quantity cell will have a minus sign or parentheses (e.g., "-1 M", "(3)").
-- BOUGHT options (you purchased): the Quantity cell has no minus sign or parentheses (e.g., "1", "5 M").
+- SOLD options (you wrote/sold): the Quantity cell will have a minus sign or parentheses (e.g., "-1 M", "(3)", "-2").
+- BOUGHT options (you purchased): the Quantity cell has no minus sign or parentheses (e.g., "1", "5 M", "2").
 - Letters like "M" or other suffixes do NOT affect the sign; rely solely on the minus sign or parentheses.
 - Include 'quantityText' and 'positionText' fields in the JSON for every option position.
 - Provide the numeric 'contracts' with the correct sign derived from 'quantityText'.
 - If the quantity cell is unreadable, set 'quantityText' to "UNKNOWN" and 'contracts' to null (do NOT infer the sign).
+
+SAME STRIKE GROUPING - CRITICAL FOR ACCURACY:
+When you see multiple contracts at the SAME strike and expiration (e.g., Quantity shows "-2" or "2"):
+- Record this as a SINGLE position with contracts = -2 or +2
+- DO NOT split "-2" into two separate "-1" positions
+- DO NOT split "2" into two separate "1" positions
+- The quantityText field should capture the exact text: "-2", "2", "-2 M", "2 M", etc.
+
+MULTIPLE ROWS FOR SAME TICKER - CRITICAL:
+You may see the SAME ticker (e.g., IBIT) appear in MULTIPLE rows with DIFFERENT strikes or expiration dates:
+- Example: IBIT $70 Call Nov-21-2025 AND IBIT $70 Call Jan-16-2026 (different expirations)
+- Example: IBIT $70 Call Nov-21-2025 AND IBIT $72 Call Nov-28-2025 (different strikes)
+- You MUST extract ALL of these as SEPARATE positions
+- Read the ENTIRE table row by row - do NOT skip any rows
+- Pay special attention to expiration dates to differentiate positions
+
+VISUAL EXAMPLES OF QUANTITY COLUMN:
+✓ CORRECT interpretations:
+  - "-2 M" → contracts: -2, quantityText: "-2 M" (SOLD 2 contracts)
+  - "2 M" → contracts: 2, quantityText: "2 M" (BOUGHT 2 contracts)
+  - "-1" → contracts: -1, quantityText: "-1" (SOLD 1 contract)
+  - "1" → contracts: 1, quantityText: "1" (BOUGHT 1 contract)
+  - "(5)" → contracts: -5, quantityText: "(5)" (SOLD 5 contracts, parentheses = negative)
+  - "1 M" → contracts: 1, quantityText: "1 M" (BOUGHT 1 contract, no minus/parens)
+
+✗ INCORRECT interpretations to AVOID:
+  - "-2 M" split into two positions with -1 each (WRONG - should be single position)
+  - "2 M" interpreted as "-2" (WRONG - no minus sign means BOUGHT, not SOLD)
+  - "1 M" interpreted as multiple positions (WRONG - this is quantity 1)
+
+CONFIDENCE SCORING - NEW REQUIREMENT:
+For each option position, assess your confidence in the quantity/direction:
+- If Quantity column is clearly visible with unambiguous minus sign or parentheses → HIGH confidence
+- If Quantity text is slightly blurry but sign is discernible → MEDIUM confidence
+- If Quantity text is unclear, overlapping, or you're guessing → LOW confidence (set quantityText="UNKNOWN")
+
+Add a 'directionConfidence' field to each option position: "HIGH", "MEDIUM", or "LOW"
 
 WHEEL STRATEGY FOCUS: Extract ALL option details into metadata.optionPositions:
 - Exact strike prices
@@ -449,10 +541,11 @@ const buildRequestBody = (image: string, ticker: string) => ({
     },
   ],
   tools: PORTFOLIO_TOOL,
-  tool_choice: { type: "function", function: { name: "extract_portfolio" } }
+  tool_choice: { type: "function", function: { name: "extract_portfolio" } },
 });
 
-const QUANTITY_SYSTEM_PROMPT = `You are verifying option quantity/contract values for a brokerage screenshot.
+const QUANTITY_SYSTEM_PROMPT =
+  `You are verifying option quantity/contract values for a brokerage screenshot.
 - Always read the Quantity/Contracts column EXACTLY as rendered (e.g., "-5 M", "5", "(3)").
 - Respond with JSON: { "quantities": [ { "key": string, "quantityText": string } ] }.
 - If a quantity is unreadable, set quantityText to "UNKNOWN" (do NOT guess).
@@ -465,10 +558,13 @@ const buildQuantityFollowupBody = (image: string, legs: OptionPosition[]) => {
     const strike = leg.strike ?? "UNKNOWN";
     const expiry = leg.expiry ?? "UNKNOWN";
     const key = buildOptionKey(leg);
-    return `${index + 1}. key: ${key}\n   symbol: ${symbol}\n   optionType: ${type}\n   strike: ${strike}\n   expiry: ${expiry}`;
-  }).join('\n\n');
+    return `${
+      index + 1
+    }. key: ${key}\n   symbol: ${symbol}\n   optionType: ${type}\n   strike: ${strike}\n   expiry: ${expiry}`;
+  }).join("\n\n");
 
-  const instructions = `Read the Quantity/Contracts column for each of the following option rows. Return JSON with an array called quantities. Each entry must include the provided key and the exact quantityText. Do not infer or normalise.\n\n${lines}`;
+  const instructions =
+    `Read the Quantity/Contracts column for each of the following option rows. Return JSON with an array called quantities. Each entry must include the provided key and the exact quantityText. Do not infer or normalise.\n\n${lines}`;
 
   return {
     model: "gpt-4o",
@@ -489,10 +585,10 @@ const buildQuantityFollowupBody = (image: string, legs: OptionPosition[]) => {
 };
 
 const buildOptionKey = (opt: OptionPosition): string => {
-  const symbol = (opt.symbol ?? '').toUpperCase();
-  const type = (opt.optionType ?? opt.type ?? '').toUpperCase();
-  const strike = opt.strike ?? '';
-  const expiry = opt.expiry ?? '';
+  const symbol = (opt.symbol ?? "").toUpperCase();
+  const type = (opt.optionType ?? opt.type ?? "").toUpperCase();
+  const strike = opt.strike ?? "";
+  const expiry = opt.expiry ?? "";
   return `${symbol}|${type}|${strike}|${expiry}`;
 };
 
@@ -518,11 +614,15 @@ const fetchQuantityOverrides = async (
   }
 
   const content = data.choices?.[0]?.message?.content ?? "{}";
-  let parsed: { quantities?: Array<{ key?: string; quantityText?: string }> } = {};
+  let parsed: { quantities?: Array<{ key?: string; quantityText?: string }> } =
+    {};
   try {
     parsed = JSON.parse(content);
   } catch (err) {
-    console.error("⚠️ [PORTFOLIO VISION] Quantity follow-up JSON parse failed:", err);
+    console.error(
+      "⚠️ [PORTFOLIO VISION] Quantity follow-up JSON parse failed:",
+      err,
+    );
     return new Map();
   }
 
@@ -534,7 +634,11 @@ const fetchQuantityOverrides = async (
   return overrides;
 };
 
-const fetchAiResponse = async (image: string, ticker: string, apiKey: string) => {
+const fetchAiResponse = async (
+  image: string,
+  ticker: string,
+  apiKey: string,
+) => {
   console.log(`🔍 [PORTFOLIO VISION] Starting analysis for ticker: ${ticker}`);
   const body = buildRequestBody(image, ticker);
 
@@ -551,10 +655,10 @@ const fetchAiResponse = async (image: string, ticker: string, apiKey: string) =>
     choices?: Array<{
       message?: {
         tool_calls?: Array<{
-          function?: { name?: string; arguments?: string }
-        }>
-      }
-    }>
+          function?: { name?: string; arguments?: string };
+        }>;
+      };
+    }>;
   };
 
   console.log(`📊 [PORTFOLIO VISION] OpenAI status: ${response.status}`);
@@ -565,21 +669,35 @@ const fetchAiResponse = async (image: string, ticker: string, apiKey: string) =>
 
   const message = aiData.choices?.[0]?.message;
   const toolArgs =
-    message?.tool_calls?.find(tc => tc.function?.name === "extract_portfolio")
+    message?.tool_calls?.find((tc) => tc.function?.name === "extract_portfolio")
       ?.function?.arguments ?? "{}";
 
-  const rawText = typeof toolArgs === "string" ? toolArgs : JSON.stringify(toolArgs);
-  console.log(`📝 [PORTFOLIO VISION] Function arguments length: ${rawText.length}`);
+  const rawText = typeof toolArgs === "string"
+    ? toolArgs
+    : JSON.stringify(toolArgs);
+  console.log(
+    `📝 [PORTFOLIO VISION] Function arguments length: ${rawText.length}`,
+  );
 
   return { aiData, rawText };
 };
 
-const analyzePortfolioImage = async (image: string, ticker: string, apiKey: string): Promise<AnalysisOutcome> => {
+const analyzePortfolioImage = async (
+  image: string,
+  ticker: string,
+  apiKey: string,
+): Promise<AnalysisOutcome> => {
   const { aiData, rawText } = await fetchAiResponse(image, ticker, apiKey);
 
   if (aiData.choices?.[0]?.message?.refusal) {
-    console.warn("⚠️ [PORTFOLIO VISION] AI refused the request:", aiData.choices[0].message.refusal);
-    return { success: false, portfolio: buildDefaultPortfolio("AI refused to process the image") };
+    console.warn(
+      "⚠️ [PORTFOLIO VISION] AI refused the request:",
+      aiData.choices[0].message.refusal,
+    );
+    return {
+      success: false,
+      portfolio: buildDefaultPortfolio("AI refused to process the image"),
+    };
   }
 
   try {
@@ -588,7 +706,10 @@ const analyzePortfolioImage = async (image: string, ticker: string, apiKey: stri
     // Hard caps for stability
     if (Array.isArray(portfolio.metadata?.optionPositions)) {
       portfolio.metadata.optionPositions = portfolio.metadata.optionPositions
-        .sort((a,b) => new Date(a?.expiry ?? '').getTime() - new Date(b?.expiry ?? '').getTime())
+        .sort((a, b) =>
+          new Date(a?.expiry ?? "").getTime() -
+          new Date(b?.expiry ?? "").getTime()
+        )
         .slice(-20);
     }
     if (Array.isArray(portfolio.positions)) {
@@ -603,11 +724,16 @@ const analyzePortfolioImage = async (image: string, ticker: string, apiKey: stri
         optionPositions: normalizedOptionPositions,
       };
     } catch (postProcessError) {
-      console.error(`⚠️ [PORTFOLIO VISION] Post-processing failed, keeping original data:`, postProcessError);
+      console.error(
+        `⚠️ [PORTFOLIO VISION] Post-processing failed, keeping original data:`,
+        postProcessError,
+      );
     }
 
     const optionPositionsArray = normalizedOptionPositions ?? [];
-    const missingQuantity = optionPositionsArray.filter((pos) => pos.signSource !== 'quantityText' || !pos.quantityText);
+    const missingQuantity = optionPositionsArray.filter((pos) =>
+      pos.signSource !== "quantityText" || !pos.quantityText
+    );
     if (missingQuantity.length > 0) {
       try {
         const overrides = await fetchQuantityOverrides(image, missingQuantity);
@@ -618,18 +744,18 @@ const analyzePortfolioImage = async (image: string, ticker: string, apiKey: stri
           const overrideText = overrides.get(key);
           if (!overrideText) return;
 
-          if (overrideText === 'UNKNOWN') {
-            pos.quantityText = 'UNKNOWN';
-            pos.directionConfidence = 'LOW';
-            pos.signSource = pos.signSource ?? 'model';
+          if (overrideText === "UNKNOWN") {
+            pos.quantityText = "UNKNOWN";
+            pos.directionConfidence = "LOW";
+            pos.signSource = pos.signSource ?? "model";
             return;
           }
 
           const parsed = parseContractsFromQuantityText(overrideText);
           if (parsed.contracts === null) {
             pos.quantityText = parsed.normalizedText || overrideText;
-            pos.signSource = pos.signSource ?? 'model';
-            pos.directionConfidence = 'LOW';
+            pos.signSource = pos.signSource ?? "model";
+            pos.directionConfidence = "LOW";
             return;
           }
 
@@ -639,16 +765,21 @@ const analyzePortfolioImage = async (image: string, ticker: string, apiKey: stri
 
           pos.quantityText = parsed.normalizedText || overrideText;
           pos.contracts = parsed.contracts;
-          pos.position = pos.contracts < 0 ? 'SHORT' : 'LONG';
+          pos.position = pos.contracts < 0 ? "SHORT" : "LONG";
           pos.directionConfidence = parsed.confidence;
-          pos.signSource = 'quantityText';
+          pos.signSource = "quantityText";
         });
 
         if (followUpCorrections > 0) {
-          console.log(`ℹ️ [PORTFOLIO VISION] Quantity follow-up corrected ${followUpCorrections} legs via secondary pass`);
+          console.log(
+            `ℹ️ [PORTFOLIO VISION] Quantity follow-up corrected ${followUpCorrections} legs via secondary pass`,
+          );
         }
       } catch (followUpError) {
-        console.error('⚠️ [PORTFOLIO VISION] Quantity follow-up failed:', followUpError);
+        console.error(
+          "⚠️ [PORTFOLIO VISION] Quantity follow-up failed:",
+          followUpError,
+        );
       }
     }
 
@@ -657,13 +788,23 @@ const analyzePortfolioImage = async (image: string, ticker: string, apiKey: stri
   } catch (parseError) {
     const rawTextLength = rawText?.length ?? 0;
     console.error(`❌ [PORTFOLIO VISION] JSON parse error:`, parseError);
-    console.error(`🔍 [PORTFOLIO VISION] Failed to parse text (length: ${rawTextLength})`);
+    console.error(
+      `🔍 [PORTFOLIO VISION] Failed to parse text (length: ${rawTextLength})`,
+    );
     if (rawTextLength > 0) {
-      console.error(`🔍 [PORTFOLIO VISION] First 1000 chars:`, rawText.substring(0, 1000));
-      console.error(`🔍 [PORTFOLIO VISION] Last 500 chars:`, rawText.substring(Math.max(0, rawTextLength - 500)));
+      console.error(
+        `🔍 [PORTFOLIO VISION] First 1000 chars:`,
+        rawText.substring(0, 1000),
+      );
+      console.error(
+        `🔍 [PORTFOLIO VISION] Last 500 chars:`,
+        rawText.substring(Math.max(0, rawTextLength - 500)),
+      );
     }
 
-    const fallback = buildDefaultPortfolio("JSON parsing failed despite JSON mode");
+    const fallback = buildDefaultPortfolio(
+      "JSON parsing failed despite JSON mode",
+    );
     return { success: false, portfolio: fallback };
   }
 };
@@ -676,14 +817,29 @@ const validatePayload = async (req: Request): Promise<
   try {
     payload = await req.json();
   } catch {
-    return { ok: false, response: jsonResponse({ success: false, error: "Invalid JSON body" }, 400) };
+    return {
+      ok: false,
+      response: jsonResponse(
+        { success: false, error: "Invalid JSON body" },
+        400,
+      ),
+    };
   }
 
-  const ticker = typeof payload.ticker === "string" && payload.ticker.trim().length > 0 ? payload.ticker.trim() : "UNKNOWN";
+  const ticker =
+    typeof payload.ticker === "string" && payload.ticker.trim().length > 0
+      ? payload.ticker.trim()
+      : "UNKNOWN";
   const normalizedImage = normalizeImageInput(payload.image);
 
   if (!normalizedImage) {
-    return { ok: false, response: jsonResponse({ success: false, error: "image is required" }, 400) };
+    return {
+      ok: false,
+      response: jsonResponse(
+        { success: false, error: "image is required" },
+        400,
+      ),
+    };
   }
 
   return { ok: true, value: { image: normalizedImage, ticker } };
@@ -698,7 +854,10 @@ Deno.serve(async (req) => {
   if (!validation.ok) return validation.response;
 
   if (!OPENAI_API_KEY) {
-    return jsonResponse({ success: false, error: "OpenAI API key not configured" }, 500);
+    return jsonResponse({
+      success: false,
+      error: "OpenAI API key not configured",
+    }, 500);
   }
 
   try {

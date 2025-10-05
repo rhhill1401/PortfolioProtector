@@ -466,7 +466,7 @@ CRITICAL: Look for OPTION positions (covered calls, cash-secured puts, long opti
 ALSO look for stock positions (extract into main "positions" array):
 - Stock symbols (like AAPL, TSLA, MSFT, IBIT, etc.)
 - Share quantities (number of shares owned)
-- Purchase/cost basis prices
+- **CRITICAL**: Purchase/cost basis prices (often labeled "Average cost basis", "Cost basis total", or "Purchase price") - ALWAYS extract this field as "purchasePrice" if visible
 - Current market prices
 - Total market values
 - Gain/loss percentages

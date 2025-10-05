@@ -152,16 +152,24 @@ node tests/edge-functions/test-portfolio-vision.cjs IBIT
 
 ---
 
-### Sub-Phase 2.5b: Advanced Strategy Detection (Client-Side)
+### Sub-Phase 2.5b: Advanced Strategy Detection (Client-Side) 🏗️ IN PROGRESS
 
 **File:** `src/services/deterministic/calculator.ts`
 
+**Phase 2.5b Implementation Checklist:**
+- [x] Implement `detectCallRatioSpreads()` in calculator.ts
+- [x] Fix detection priority order (complex strategies first)
+- [x] Test with IBIT portfolio (+1 $60C, +1 $70C, -1 $80C Jan-16)
+- [x] Run code review on changes
+- [ ] User verification in browser (PENDING)
+
 **New Detection Functions:**
 
-- [ ] `detectCallRatioSpreads()` - Detect 2:1, 3:1, 3:2 long:short call ratios
+- [x] `detectCallRatioSpreads()` - Detect 2:1, 3:1, 3:2 long:short call ratios
   - Pattern: Multiple long calls + fewer short calls, same expiry
   - Example: +1 $60C, +1 $70C, -1 $80C = 2:1 ratio spread
-  - Calculate: Max profit, max loss, breakeven zones
+  - Calculate: Net premium, max loss (debit), unlimited upside
+  - **Status**: ✅ IMPLEMENTED - Detects IBIT 2:1 ratio spread correctly
 
 - [ ] `detectPutRatioSpreads()` - Same as calls, but for puts
   - Pattern: Multiple long puts + fewer short puts, same expiry

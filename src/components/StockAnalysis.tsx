@@ -1072,61 +1072,114 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 														const delta = position.delta || 0;
 														const isCall = position.type === 'CALL';
 														const moneyness = ((currentPrice - position.strike) / position.strike) * 100;
-														
+														const isSold = position.contracts < 0; // SOLD = assignment risk, BOUGHT = profit opportunity
+
 														// Build guidance based on position characteristics
 														let action = '';
 														let watching = '';
 														let trigger = '';
-														
-														if (daysToExpiry <= 5) {
-															// Expiring soon
-															if (isCall && moneyness > 0) {
-																action = `Do nothing. Let it be called away on ${position.expiry} at $${position.strike}`;
-																watching = `Stock will be sold at $${position.strike} if price stays above strike`;
-															} else if (isCall && moneyness < 0) {
-																action = `Let it expire worthless on ${position.expiry}. Keep your shares and the premium`;
-																watching = `Option will expire worthless if ${tickerSymbol} stays below $${position.strike}`;
-															} else if (!isCall && moneyness < 0) {
-																action = `Do nothing. You'll be assigned shares at $${position.strike}`;
-																watching = `You'll buy shares at $${position.strike} if price stays below strike`;
+														let riskLevel = 'low';
+
+														// BOUGHT POSITIONS: You own the option, no assignment risk
+														if (!isSold) {
+															const intrinsicValue = isCall
+																? Math.max(0, currentPrice - position.strike)
+																: Math.max(0, position.strike - currentPrice);
+															const isProfitable = intrinsicValue > 0;
+
+															if (daysToExpiry <= 5) {
+																// Expiring soon
+																if (isProfitable) {
+																	action = `Sell to close or exercise before ${position.expiry}`;
+																	watching = `In-the-money by $${intrinsicValue.toFixed(2)}. Don't let it expire!`;
+																	trigger = `Sell before market close on ${position.expiry}`;
+																	riskLevel = 'medium';
+																} else {
+																	action = `Let it expire worthless. Loss limited to premium paid`;
+																	watching = `Out-of-the-money. Max loss = premium paid`;
+																	riskLevel = 'high'; // About to lose premium
+																}
+															} else if (Math.abs(delta) > 0.70) {
+																// Deep ITM - winning position
+																action = `Hold for more profit or take gains now`;
+																watching = `Strong position! Delta: ${(Math.abs(delta) * 100).toFixed(0)}%. Gaining $${Math.abs(position.theta || 0).toFixed(2)}/day`;
+																trigger = `Consider taking profit if ${tickerSymbol} ${isCall ? 'rises above' : 'falls below'} $${(position.strike * (isCall ? 1.15 : 0.85)).toFixed(2)}`;
+																riskLevel = 'low'; // Winning trade
+															} else if (Math.abs(delta) > 0.30) {
+																// Near the money - neutral
+																action = `Hold and monitor. Position has potential`;
+																watching = `Delta: ${(Math.abs(delta) * 100).toFixed(0)}%. Time value remaining`;
+																trigger = `Reassess if ${tickerSymbol} moves ${isCall ? 'below' : 'above'} $${position.strike.toFixed(2)}`;
+																riskLevel = 'medium';
 															} else {
-																action = `Let it expire worthless. Keep the premium`;
-																watching = `Option will expire worthless if ${tickerSymbol} stays above $${position.strike}`;
+																// OTM - losing position
+																action = `Consider cutting losses if no recovery expected`;
+																watching = `Out-of-the-money. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%. Losing $${Math.abs(position.theta || 0).toFixed(2)}/day`;
+																trigger = `Close position if ${tickerSymbol} moves further ${isCall ? 'below' : 'above'} $${(position.strike * (isCall ? 0.95 : 1.05)).toFixed(2)}`;
+																riskLevel = 'high'; // Likely to lose premium
 															}
-														} else if (Math.abs(delta) > 0.90) {
-															// Deep in the money - high assignment risk
-															if (isCall) {
-																action = `Consider rolling if you want to keep shares. Otherwise, prepare for assignment`;
-																trigger = `Roll ONE at a time when ${tickerSymbol} drops below $${(position.strike * 0.98).toFixed(2)}`;
-																watching = `Very likely to be assigned. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%`;
-															} else {
-																action = `High chance of assignment. Prepare cash or consider rolling`;
-																trigger = `Roll if ${tickerSymbol} rises above $${(position.strike * 1.02).toFixed(2)}`;
-																watching = `Very likely to be assigned. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%`;
-															}
-														} else if (Math.abs(delta) > 0.70) {
-															// Moderate to high assignment risk
-															action = `Hold for now. Monitor daily`;
-															trigger = `Consider action if ${tickerSymbol} ${isCall ? 'rises above' : 'falls below'} $${(position.strike * (isCall ? 1.05 : 0.95)).toFixed(2)}`;
-															watching = `Assignment probability: ${(Math.abs(delta) * 100).toFixed(0)}%`;
-														} else if (Math.abs(delta) > 0.30) {
-															// Moderate risk
-															action = `Hold and collect theta decay`;
-															watching = `Earning $${Math.abs(position.theta || 0).toFixed(2)}/day from time decay`;
-															trigger = `Watch if ${tickerSymbol} moves ${isCall ? 'above' : 'below'} $${(position.strike * (isCall ? 0.98 : 1.02)).toFixed(2)}`;
-														} else {
-															// Low risk
-															action = `Hold to expiration. Very safe`;
-															watching = `Low assignment risk (${(Math.abs(delta) * 100).toFixed(0)}%). Earning $${Math.abs(position.theta || 0).toFixed(2)}/day`;
 														}
-														
+														// SOLD POSITIONS: Assignment risk based on delta
+														else {
+															if (daysToExpiry <= 5) {
+																// Expiring soon
+																if (isCall && moneyness > 0) {
+																	action = `Do nothing. Let it be called away on ${position.expiry} at $${position.strike}`;
+																	watching = `Stock will be sold at $${position.strike} if price stays above strike`;
+																	riskLevel = 'medium';
+																} else if (isCall && moneyness < 0) {
+																	action = `Let it expire worthless on ${position.expiry}. Keep your shares and the premium`;
+																	watching = `Option will expire worthless if ${tickerSymbol} stays below $${position.strike}`;
+																	riskLevel = 'low';
+																} else if (!isCall && moneyness < 0) {
+																	action = `Do nothing. You'll be assigned shares at $${position.strike}`;
+																	watching = `You'll buy shares at $${position.strike} if price stays below strike`;
+																	riskLevel = 'medium';
+																} else {
+																	action = `Let it expire worthless. Keep the premium`;
+																	watching = `Option will expire worthless if ${tickerSymbol} stays above $${position.strike}`;
+																	riskLevel = 'low';
+																}
+															} else if (Math.abs(delta) > 0.90) {
+																// Deep in the money - high assignment risk
+																if (isCall) {
+																	action = `Consider rolling if you want to keep shares. Otherwise, prepare for assignment`;
+																	trigger = `Roll ONE at a time when ${tickerSymbol} drops below $${(position.strike * 0.98).toFixed(2)}`;
+																	watching = `Very likely to be assigned. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%`;
+																} else {
+																	action = `High chance of assignment. Prepare cash or consider rolling`;
+																	trigger = `Roll if ${tickerSymbol} rises above $${(position.strike * 1.02).toFixed(2)}`;
+																	watching = `Very likely to be assigned. Delta: ${(Math.abs(delta) * 100).toFixed(0)}%`;
+																}
+																riskLevel = 'high';
+															} else if (Math.abs(delta) > 0.70) {
+																// Moderate to high assignment risk
+																action = `Hold for now. Monitor daily`;
+																trigger = `Consider action if ${tickerSymbol} ${isCall ? 'rises above' : 'falls below'} $${(position.strike * (isCall ? 1.05 : 0.95)).toFixed(2)}`;
+																watching = `Assignment probability: ${(Math.abs(delta) * 100).toFixed(0)}%`;
+																riskLevel = 'high';
+															} else if (Math.abs(delta) > 0.30) {
+																// Moderate risk
+																action = `Hold and collect theta decay`;
+																watching = `Earning $${Math.abs(position.theta || 0).toFixed(2)}/day from time decay`;
+																trigger = `Watch if ${tickerSymbol} moves ${isCall ? 'above' : 'below'} $${(position.strike * (isCall ? 0.98 : 1.02)).toFixed(2)}`;
+																riskLevel = 'medium';
+															} else {
+																// Low risk
+																action = `Hold to expiration. Very safe`;
+																watching = `Low assignment risk (${(Math.abs(delta) * 100).toFixed(0)}%). Earning $${Math.abs(position.theta || 0).toFixed(2)}/day`;
+																riskLevel = 'low';
+															}
+														}
+
 														return {
 															position,
 															action,
 															watching,
 															trigger,
 															moneyness,
-															riskLevel: Math.abs(delta) > 0.70 ? 'high' : Math.abs(delta) > 0.30 ? 'medium' : 'low'
+															riskLevel,
+															isSold
 														};
 													};
 													

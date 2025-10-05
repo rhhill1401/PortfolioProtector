@@ -110,7 +110,9 @@ export const StrategyCard = ({ strategy, className }: StrategyCardProps) => {
         </div>
         <div>
           <span className="text-slate-500">Risk Profile</span>
-          <div className="font-semibold text-slate-800">{strategy.riskProfile ? strategy.riskProfile.replace('_', ' ') : '—'}</div>
+          <div className="font-semibold text-slate-800 capitalize">
+            {strategy.riskProfile || '—'}
+          </div>
         </div>
       </div>
 

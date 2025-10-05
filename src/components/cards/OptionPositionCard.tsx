@@ -95,11 +95,24 @@ export function OptionPositionCard({ position, currentPrice, className = '' }: O
 
   // Determine risk level prioritising delta if available
   const getRiskLevel = (): { label: string; colorClasses: string } => {
+    const isSold = position.contracts < 0;
+
     if (typeof position.delta === 'number' && !Number.isNaN(position.delta)) {
       const absDelta = Math.abs(position.delta);
-      if (absDelta >= 0.75) return { label: 'HIGH RISK', colorClasses: 'bg-red-100 text-red-700' };
-      if (absDelta >= 0.35) return { label: 'MODERATE RISK', colorClasses: 'bg-yellow-100 text-yellow-700' };
-      return { label: 'LOW RISK', colorClasses: 'bg-green-100 text-green-700' };
+
+      // SOLD positions: High delta = high assignment risk
+      if (isSold) {
+        if (absDelta >= 0.75) return { label: 'HIGH RISK', colorClasses: 'bg-red-100 text-red-700' };
+        if (absDelta >= 0.35) return { label: 'MODERATE RISK', colorClasses: 'bg-yellow-100 text-yellow-700' };
+        return { label: 'LOW RISK', colorClasses: 'bg-green-100 text-green-700' };
+      }
+
+      // BOUGHT positions: High delta = winning trade (low risk of total loss)
+      else {
+        if (absDelta >= 0.75) return { label: 'LOW RISK', colorClasses: 'bg-green-100 text-green-700' }; // Deep ITM, winning
+        if (absDelta >= 0.35) return { label: 'MODERATE RISK', colorClasses: 'bg-yellow-100 text-yellow-700' }; // Near money
+        return { label: 'HIGH RISK', colorClasses: 'bg-red-100 text-red-700' }; // OTM, likely to lose premium
+      }
     }
 
     const riskFromData = fromRiskString((position as any).risk);

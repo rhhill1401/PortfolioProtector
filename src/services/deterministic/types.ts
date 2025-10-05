@@ -52,7 +52,7 @@ export interface StrategySummary {
   maxProfit?: number | null;
   maxLoss?: number | null;
   breakeven?: number | null;  // per-share price breakeven, when applicable
-  riskProfile?: 'defined' | 'covered' | 'undefined';
+  riskProfile?: 'defined' | 'covered' | 'unlimited';
   riskLevel?: RiskLevel;
   tags?: string[];
   components: string[];       // ["LONG 1 × $34 CALL (2025-12-19)", ...]

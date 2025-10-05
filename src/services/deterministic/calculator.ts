@@ -78,9 +78,11 @@ const detectCoveredCalls = (
     remainingShares -= coveredQty * 100;
 
     const netPremium = signAwarePremium(call, coveredQty);
-    const basis = typeof shareBasis === 'number' && !Number.isNaN(shareBasis)
+    // Use shareBasis only if it's a valid, positive number
+    // If 0 or missing, fall back to currentPrice (portfolio-vision doesn't extract purchase prices)
+    const basis = typeof shareBasis === 'number' && !Number.isNaN(shareBasis) && shareBasis > 0
       ? shareBasis
-      : currentPrice; // fallback to current price if basis unknown
+      : currentPrice;
 
     // Max Profit at assignment: (K - B)*100*qty + credit
     const maxProfit = (call.strike - basis) * 100 * coveredQty + netPremium;
@@ -108,6 +110,78 @@ const detectCoveredCalls = (
   return strategies;
 };
 
+const detectCallRatioSpreads = (positions: PositionDet[]): StrategySummary[] => {
+  const strategies: StrategySummary[] = [];
+
+  // Group by symbol|expiry
+  const groups = new Map<string, { longs: PositionDet[]; shorts: PositionDet[] }>();
+
+  positions
+    .filter((p) => p.type === 'CALL')
+    .forEach((pos) => {
+      const key = `${pos.symbol}|${pos.expiry}`;
+      if (!groups.has(key)) {
+        groups.set(key, { longs: [], shorts: [] });
+      }
+      const bucket = groups.get(key)!;
+      if (pos.contracts > 0) {
+        bucket.longs.push(pos);
+      } else if (pos.contracts < 0) {
+        bucket.shorts.push(pos);
+      }
+    });
+
+  // For each group, check if longs > shorts (ratio spread)
+  groups.forEach(({ longs, shorts }) => {
+    const totalLongs = longs.reduce((sum, l) => sum + l.contracts, 0);
+    const totalShorts = Math.abs(shorts.reduce((sum, s) => sum + s.contracts, 0));
+
+    // Ratio spread: more longs than shorts
+    if (totalLongs > totalShorts && totalShorts > 0) {
+      const ratio = `${totalLongs}:${totalShorts}`;
+      const netExposure = totalLongs - totalShorts;
+
+      // Calculate net premium (longs are debits, shorts are credits)
+      const longPremium = longs.reduce((sum, l) => sum + signAwarePremium(l, l.contracts), 0);
+      const shortPremium = shorts.reduce((sum, s) => sum + signAwarePremium(s, Math.abs(s.contracts)), 0);
+      const netPremium = longPremium + shortPremium;
+
+      // Get strikes for description and breakeven calc
+      const shortStrike = Math.min(...shorts.map(s => s.strike));
+      const lowestLongStrike = Math.min(...longs.map(l => l.strike));
+
+      // Calculate breakeven points
+      // Lower breakeven: lowest long strike + (net debit per contract)
+      const netDebit = netPremium < 0 ? Math.abs(netPremium) : 0;
+      const debitPerContract = netDebit / totalLongs; // Spread across all long contracts
+      const lowerBreakeven = lowestLongStrike + (debitPerContract / 100);
+
+      // Upper breakeven: short strike + (net debit / net exposure / 100)
+      const upperBreakeven = netExposure > 0 ? shortStrike + (netDebit / (netExposure * 100)) : null;
+
+      strategies.push({
+        id: `call-ratio-spread-${longs[0].symbol}-${longs[0].expiry}-${ratio}`,
+        label: `${ratio} Long Call Ratio Spread`,
+        legCount: longs.length + shorts.length,
+        netPremium,
+        maxProfit: null, // Max profit at short strike
+        maxLoss: netDebit, // Max loss is net debit paid
+        breakeven: lowerBreakeven, // Lower breakeven (primary)
+        riskProfile: 'unlimited', // Unlimited upside
+        riskLevel: 'MEDIUM',
+        tags: ['RATIO SPREAD', 'UNLIMITED UPSIDE'],
+        components: [
+          ...longs.map(l => formatLeg('LONG', l.contracts, l)),
+          ...shorts.map(s => formatLeg('SHORT', Math.abs(s.contracts), s)),
+        ],
+        description: `${ratio} ratio: ${netExposure} net long exposure, breakevens at $${lowerBreakeven.toFixed(2)} and $${upperBreakeven?.toFixed(2) || 'N/A'}, unlimited upside above $${upperBreakeven?.toFixed(2) || shortStrike}`,
+      });
+    }
+  });
+
+  return strategies;
+};
+
 const detectBullCallSpreads = (positions: PositionDet[]): StrategySummary[] => {
   const strategies: StrategySummary[] = [];
 
@@ -130,6 +204,12 @@ const detectBullCallSpreads = (positions: PositionDet[]): StrategySummary[] => {
     });
 
   groups.forEach(({ longs, shorts }) => {
+    // Skip if this is a ratio spread (more longs than shorts)
+    const totalLongs = longs.reduce((sum, l) => sum + l.remaining, 0);
+    const totalShorts = shorts.reduce((sum, s) => sum + s.remaining, 0);
+    if (totalLongs > totalShorts && totalShorts > 0) {
+      return; // This is a ratio spread, skip bull spread detection
+    }
     longs.sort((a, b) => a.strike - b.strike);
     shorts.sort((a, b) => a.strike - b.strike);
 
@@ -293,7 +373,9 @@ export const detectStrategies = ({
 }: DetectArgs): DetectResult => {
   const strategies: StrategySummary[] = [];
 
+  // IMPORTANT: Complex strategies first to prevent greedy pairing
   strategies.push(
+    ...detectCallRatioSpreads(positions), // ← Check FIRST (prevents bull spread consuming legs)
     ...detectCoveredCalls(positions, shareCount, currentPrice, shareBasis ?? null),
     ...detectBullCallSpreads(positions),
     ...detectBullPutSpreads(positions),

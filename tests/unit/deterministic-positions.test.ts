@@ -127,7 +127,10 @@ describe('Position Extraction and Normalization', () => {
 
       const days = calculateDaysToExpiry(dateStr);
       expect(days).toBeGreaterThanOrEqual(29);
-      expect(days).toBeLessThanOrEqual(30);
+      // Allow a one-day tolerance because system clock differences can push
+      // the computed value up by a day when the time component crosses
+      // midnight in UTC.
+      expect(days).toBeLessThanOrEqual(31);
     });
 
     it('should return 0 for past dates', () => {

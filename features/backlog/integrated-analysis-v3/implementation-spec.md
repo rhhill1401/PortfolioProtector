@@ -451,6 +451,243 @@ This phase addresses the root cause of why "every AI seems to not detect the rig
 - Straddles and Strangles
 - Multi‑leg synthetic constructions (e.g., covered strangle)
 
+## 🎓 RECOMMENDATIONS SYSTEM (A-F Grading) - SEPARATE WORKSTREAM ✅ Phase 1 Complete
+
+**Location:** `supabase/functions/integrated-analysis-v3/`
+
+**Purpose:** Provide portfolio-wide A-F grading with upgrade recommendations using GPT-5 reasoning model
+
+**Architecture:** Edge function with modular graders → scenario analysis → AI recommendations
+
+### Phase 1: Folder Structure & Types ✅ COMPLETED (2025-01-05)
+
+**Files Created:**
+- ✅ `types/recommendations.ts` - All TypeScript interfaces (140 lines)
+- ✅ `coach/graders/coverage.ts` - Coverage grader stub
+- ✅ `coach/graders/income.ts` - Income grader stub
+- ✅ `coach/graders/risk.ts` - Risk grader stub
+- ✅ `coach/graders/upside.ts` - Upside grader stub
+- ✅ `coach/graders/sophistication.ts` - Sophistication grader stub
+- ✅ `coach/scenario.ts` - Scenario analysis calculator stub
+- ✅ `coach/prompts/recommendations.ts` - GPT-5 system/user prompts
+- ✅ `coach/recommendations.ts` - Main orchestrator (throws error until Phase 2-5 complete)
+- ✅ `clients/openai.ts` - GPT-5 client with retry logic, reasoning output
+- ✅ `index.ts` - Edge function entry point
+- ✅ `deno.json` - OpenAI dependency config
+
+**Key Decisions:**
+- ✅ Default model: `gpt-5-preview` (via `OPENAI_MODEL` env var)
+- ✅ Scenario levels: -30%, -15%, 0%, +15%, +30%, +50%, +100% (spec-compliant)
+- ✅ Orchestrator throws error (prevents misleading F/0% grades during development)
+- ✅ All graders return F/0% stubs (Phase 2 will implement real logic)
+
+**Lint Status:** 0 errors, 138 warnings (3 new in v3 files, all acceptable)
+
+### Phase 2: Pure Grader Functions with Tests ✅ COMPLETED
+
+**Goal:** Implement all 5 graders with real logic + 5+ unit tests each
+
+**Checklist:**
+- [x] Implement `gradeCoverage()` - How well shares are covered with options ✅ COMPLETED
+  - [x] Write 5+ unit tests (14 tests created)
+  - [x] Run tests, verify 100% pass ✅ 14/14 passing
+- [x] Implement `gradeIncome()` - Premium yield and theta decay efficiency ✅ COMPLETED
+  - [x] Write 5+ unit tests (19 tests created)
+  - [x] Run tests, verify 100% pass ✅ 19/19 passing
+- [x] Implement `gradeRisk()` - Naked positions, unlimited risk, assignment risk ✅ COMPLETED
+  - [x] Write 5+ unit tests (17 tests created)
+  - [x] Run tests, verify 100% pass ✅ 17/17 passing
+- [x] Implement `gradeUpside()` - Unlimited profit potential, uncapped gains ✅ COMPLETED
+  - [x] Write 5+ unit tests (19 tests created)
+  - [x] Run tests, verify 100% pass ✅ 19/19 passing
+- [x] Implement `gradeSophistication()` - Strategy complexity (basic → advanced) ✅ COMPLETED
+  - [x] Write 5+ unit tests (22 tests created)
+  - [x] Run tests, verify 100% pass ✅ 22/22 passing
+
+**Testing:** `npx vitest run tests/unit/recommendations/graders/` (91 tests passing: 14 coverage + 19 income + 17 risk + 19 upside + 22 sophistication)
+
+### Phase 3: Scenario Analysis Calculator ✅ COMPLETED
+
+- [x] Implement `calculateScenario()` - P/L at specific price level ✅ COMPLETED
+- [x] Calculate intrinsic value for calls/puts ✅ COMPLETED
+- [x] Calculate portfolio value (shares + options) ✅ COMPLETED
+- [x] Write unit tests with IBIT data (7 price levels) ✅ COMPLETED
+- [x] Verify breakeven, profit, loss, max profit status labels ✅ COMPLETED
+
+**Testing:** `npx vitest run tests/unit/recommendations/scenario.test.ts` (22 tests passing)
+
+**Total Tests:** 113 tests passing (91 grader tests + 22 scenario tests)
+
+### Phase 4: OpenAI GPT-5 Client ✅ DOCUMENTED (Manual Testing Pending)
+
+- [x] Review `callOpenAI()` implementation ✅ COMPLETED
+- [x] Document testing procedures ✅ COMPLETED
+- [ ] Test `callOpenAI()` with simple prompt (requires OPENAI_API_KEY secret)
+- [ ] Verify JSON mode works (requires deployment)
+- [ ] Verify reasoning output logging (model-dependent)
+- [ ] Test retry logic with mock failures (unit test created)
+- [ ] Test timeout handling (manual test documented)
+
+**Testing Guide:** `tests/edge-functions/test-openai-client.md`
+
+**Implementation Status:**
+- Client wrapper exists and is well-implemented
+- Retry logic with exponential backoff (2s, 4s, 8s)
+- Timeout handling via AbortController
+- JSON mode enabled for structured output
+- Reasoning metadata logging (GPT-5 models only)
+
+**Manual Testing Required:**
+- Deploy test function to Supabase
+- Run tests 4.1-4.5 from testing guide
+- Verify all 5 test cases pass
+
+**Note:** OPENAI_API_KEY is already configured in Supabase (used by portfolio-vision). Manual testing can be done anytime by deploying a test function.
+
+### Phase 5: Prompts & Recommendations Orchestrator ✅ COMPLETED
+
+- [x] Implement data extraction from input ✅ COMPLETED
+- [x] Wire all graders with real data ✅ COMPLETED
+- [x] Wire scenario analysis with real data ✅ COMPLETED
+- [x] Parse GPT-5 JSON response ✅ COMPLETED
+- [x] Write integration test with IBIT portfolio ✅ COMPLETED
+
+**Files Updated:**
+- `coach/recommendations.ts` - Full orchestrator implementation
+- `tests/edge-functions/test-integrated-analysis-v3.cjs` - Integration test script
+
+**Implementation Details:**
+- ✅ RecommendationsInput interface defines expected payload
+- ✅ Data extraction for all 5 graders
+- ✅ Weighted overall score calculation (Coverage 25%, Income 20%, Risk 25%, Upside 20%, Sophistication 10%)
+- ✅ Scenario analysis for 7 price levels
+- ✅ GPT-5 prompt building with grades and scenarios
+- ✅ **Resilient AI parsing**: Try/catch around JSON.parse with markdown code fence stripping
+- ✅ **Runtime type validation**: `validateAIResponse()` checks structure before trusting AI data
+- ✅ **Graceful degradation**: Returns deterministic grades/scenarios even if AI fails
+- ✅ **Error logging**: Logs raw AI response (first 500 chars) when parsing fails
+- ✅ **Type safety**: Replaced `any` with `RecommendationsAIResponse` interface
+- ✅ **shareBasis fallback**: Defaults to currentPrice if missing (prevents NaN in scenarios)
+
+### Phase 6: Main Edge Function & Deploy ✅ COMPLETED
+
+- [x] Uncomment orchestrator imports ✅ COMPLETED
+- [x] Remove error-throwing code ✅ COMPLETED
+- [x] Wire `generateRecommendations()` with real data ✅ COMPLETED
+- [x] Add input validation ✅ COMPLETED
+- [x] Add detailed logging ✅ COMPLETED
+- [x] Create integration test script ✅ COMPLETED
+- [x] Add resilient AI parsing with graceful degradation ✅ COMPLETED
+- [x] Deploy to Supabase ✅ COMPLETED
+- [x] Run integration test ✅ COMPLETED
+
+**Deployment Results:**
+- ✅ Deployed successfully in 8.92s
+- ✅ All 12 files uploaded (index, types, graders, scenario, prompts, client)
+- ✅ Integration test passed with A- overall grade (93/100)
+- ✅ All 5 graders working correctly
+- ✅ Scenario analysis accurate (-30% to +100%)
+- ✅ AI recommendations generated successfully
+- ✅ All 13 validation checks passed
+
+**Test Output Example (IBIT Covered Call Portfolio):**
+- Coverage: A- (92/100) - 5 covered calls detected
+- Income: A+ (100/100) - $925 premium collected
+- Risk: A+ (100/100) - Fully covered position
+- Upside: A- (90/100) - Capped at $3425 max profit
+- Sophistication: D (65/100) - 1-leg strategies only
+- AI Recommendation: "Buy protective puts at $40 strike for downside protection"
+
+**Live Endpoint:** `https://twnldqhqbybnmqbsgvpq.supabase.co/functions/v1/integrated-analysis-v3`
+
+**Deployment Commands:**
+```bash
+# 1. Deploy function (OPENAI_API_KEY already configured from portfolio-vision)
+npm run deploy:ia-v3
+
+# 2. Test deployment
+node tests/edge-functions/test-integrated-analysis-v3.cjs
+```
+
+**Note:** OPENAI_API_KEY is already set in Supabase secrets (used by portfolio-vision and chart-vision). No additional API key setup needed.
+
+**Files Ready for Deployment:**
+- `supabase/functions/integrated-analysis-v3/index.ts` (main edge function)
+- `supabase/functions/integrated-analysis-v3/coach/recommendations.ts` (orchestrator)
+- `supabase/functions/integrated-analysis-v3/coach/graders/*.ts` (5 graders)
+- `supabase/functions/integrated-analysis-v3/coach/scenario.ts` (scenario calculator)
+- `supabase/functions/integrated-analysis-v3/clients/openai.ts` (AI client)
+- `supabase/functions/integrated-analysis-v3/deno.json` (dependencies)
+
+### Phase 7: UI Components ✅ COMPLETED
+
+- [x] Create `RecommendationsOverview.tsx` - Overall grade + summary ✅ COMPLETED
+- [x] Create `GradeBreakdown.tsx` - 5 grade cards ✅ COMPLETED
+- [x] Create `ScenarioChart.tsx` - P/L chart ✅ COMPLETED
+- [x] Create `UpgradeSteps.tsx` - Action items ✅ COMPLETED
+- [x] Create shared types (`src/types/recommendations.ts`) ✅ COMPLETED
+
+**Components Created:**
+
+**1. RecommendationsOverview** (`src/components/recommendations/RecommendationsOverview.tsx`)
+- Displays overall A-F grade with large badge
+- Shows portfolio summary from AI
+- Grid of 5 grade category cards (Coverage, Income, Risk, Upside, Sophistication)
+- Market context section
+- Color-coded by grade (green for A, blue for B, yellow for C, orange for D, red for F)
+
+**2. GradeBreakdown** (`src/components/recommendations/GradeBreakdown.tsx`)
+- Detailed view of each grade category
+- Shows icon, title, description for each category
+- Displays feedback, strengths, and weaknesses
+- Color-coded left border matching grade
+- Responsive two-column layout for strengths/weaknesses
+
+**3. ScenarioChart** (`src/components/recommendations/ScenarioChart.tsx`)
+- Interactive Recharts line chart showing P/L across 7 price levels
+- Scenarios: Bearish (-30%), Moderate Bearish (-15%), Flat (0%), Moderate Bullish (+15%), Bullish (+30%), Very Bullish (+50%), Moonshot (+100%)
+- Custom tooltip showing price, P/L, and status
+- Reference line at breakeven (P/L = $0)
+- Summary table below chart with all scenario details
+- Color-coded by status (red for losses, green for profits)
+
+**4. UpgradeSteps** (`src/components/recommendations/UpgradeSteps.tsx`)
+- Execution plan from AI
+- Tabbed interface for "Next Steps", "To A Grade", "To A+ Grade"
+- Priority badges (immediate, short_term, long_term)
+- Risk level badges (low, medium, high)
+- Numbered steps with action, reasoning, and impact
+- Empty state messages for tabs with no recommendations
+
+**Files Created:**
+- `src/types/recommendations.ts` - Shared TypeScript interfaces
+- `src/components/recommendations/RecommendationsOverview.tsx` - 148 lines
+- `src/components/recommendations/GradeBreakdown.tsx` - 165 lines
+- `src/components/recommendations/ScenarioChart.tsx` - 241 lines
+- `src/components/recommendations/UpgradeSteps.tsx` - 200 lines
+- `src/components/recommendations/index.ts` - Barrel export
+
+**Design Features:**
+- ✅ Dark mode support throughout
+- ✅ Responsive layouts (mobile, tablet, desktop)
+- ✅ Accessible color contrast (WCAG AA)
+- ✅ Consistent with existing app styling (Tailwind CSS)
+- ✅ Interactive elements (hover states, tooltips)
+- ✅ Empty states handled gracefully
+
+### Phase 8: Integration & E2E Testing ⏳ PENDING
+
+- [ ] Wire to StockAnalysisV2 Recommendations tab
+- [ ] Test with IBIT portfolio screenshot
+- [ ] Verify grades are accurate
+- [ ] Verify scenario chart renders
+- [ ] Verify upgrade recommendations make sense
+- [ ] Run full test suite
+
+**NOTE:** This is a **separate workstream** from Phase 2.5b (advanced strategy detection). The grading system consumes strategy data but doesn't detect it.
+
+---
+
 ## Phase 4: Coach Module (AI via Edge Function) 🚧 NEW PLAN
 
 ### Architecture & Separation of Concerns

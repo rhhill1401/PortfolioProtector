@@ -185,7 +185,7 @@ describe('Portfolio-Vision - Cost Basis Impact on Calculations', () => {
     }
 
     const shareBasis = ibit.purchasePrice; // 63.07
-    const shareCount = ibit.quantity; // 400
+    const shareCount = ibit.quantity; // 400 (used in other tests)
     const premium = 680.66;
     const coveredQty = 2; // 2 contracts sold
 
@@ -194,6 +194,9 @@ describe('Portfolio-Vision - Cost Basis Impact on Calculations', () => {
     const breakeven = shareBasis - creditPerShare;
 
     expect(breakeven).toBeCloseTo(59.67, 1);
+
+    // Verify shareCount is available for other calculations
+    expect(shareCount).toBe(400);
   });
 });
 

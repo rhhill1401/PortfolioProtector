@@ -22,6 +22,7 @@ import { calculateAggregateMetrics } from '@/services/optionLookup';
 import { groupPositionsByTimeframe, formatExpiryLabel } from '@/services/wheelTimeAnalysis';
 import type { DeterministicResult } from '@/services/deterministic/types';
 import { buildGreeksKey, type OptionGreeks } from '@/services/greeks/fetcher';
+import { callFnJson } from '@/services/supabaseFns';
 
 // Import our new modular card components
 import {
@@ -31,6 +32,15 @@ import {
   AssignmentRiskCard,
   StrategyCard,
 } from '@/components/cards';
+
+// Import v3 recommendations components
+import {
+  RecommendationsOverview,
+  GradeBreakdown,
+  ScenarioChart,
+  UpgradeSteps,
+} from '@/components/recommendations';
+import type { RecommendationsData } from '@/types/recommendations';
 
 interface StockAnalysisProps {
 	tickerSymbol: string;
@@ -337,6 +347,11 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
     const [optionGreeksMap, setOptionGreeksMap] = useState<Map<string, OptionGreeks>>(new Map());
 	const [progress, setProgress] = useState(0);
 	const progressTimer = useRef<NodeJS.Timeout | null>(null);
+
+	// V3 recommendations state
+	const [recommendationsV3, setRecommendationsV3] = useState<RecommendationsData | null>(null);
+	const [loadingRecommendationsV3, setLoadingRecommendationsV3] = useState(false);
+	const [recommendationsV3Error, setRecommendationsV3Error] = useState<string | null>(null);
 
     const mergeOptionGreeks = useCallback((incoming: Record<string, OptionGreeks> | undefined) => {
         if (!incoming) return;
@@ -707,6 +722,149 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 			if (progressTimer.current) clearInterval(progressTimer.current);
 		};
 	}, []);
+
+	// Fetch v3 recommendations when we have wheel strategy data
+	useEffect(() => {
+		const fetchRecommendationsV3 = async () => {
+			// Check feature flag
+			const useV3 = import.meta.env.VITE_USE_INTEGRATED_ANALYSIS_V3 === 'true';
+			if (!useV3) {
+				console.log('[Recommendations V3] Feature flag disabled, skipping');
+				return;
+			}
+
+			// Check if we have the necessary data
+			if (!analysisData?.wheelStrategy) {
+				console.log('[Recommendations V3] No wheel strategy data available');
+				return;
+			}
+
+			const { wheelStrategy } = analysisData;
+			const positions = wheelStrategy.currentPositions || [];
+
+			// We also need strategies from wheelDeterministic
+			const strategies = analysisData.wheelDeterministic?.strategies || [];
+
+			if (positions.length === 0) {
+				console.log('[Recommendations V3] No positions found');
+				return;
+			}
+
+			// Get current price from priceInfo or analysisData
+			const currentPrice = priceInfo.price || analysisData.summary?.currentPrice || 0;
+			if (!currentPrice) {
+				console.log('[Recommendations V3] No current price available');
+				return;
+			}
+
+			// Calculate portfolio value and share count
+			const shareCount = wheelStrategy.shareCount || 0;
+
+			// Extract shareBasis from analysisData if available
+			// Portfolio-vision returns purchasePrice in recommendations.positionSnapshot
+			let shareBasis = currentPrice; // Fallback
+
+			// Debug: Log the entire positionSnapshot to see what we have
+			console.log('[Recommendations V3] 🔍 DEBUG: positionSnapshot:',
+				analysisData.recommendations?.positionSnapshot);
+			console.log('[Recommendations V3] 🔍 DEBUG: Looking for ticker:', tickerSymbol);
+
+			const sharePosition = analysisData.recommendations?.positionSnapshot?.find(
+				(p) => {
+					console.log('[Recommendations V3] 🔍 Checking position:', p.type, 'ticker:', p.ticker, 'basis:', p.basis);
+					return p.type === 'Shares' && p.ticker === tickerSymbol;
+				}
+			);
+
+			if (sharePosition?.basis) {
+				shareBasis = sharePosition.basis;
+				console.log(`[Recommendations V3] ✅ Using share basis from portfolio: $${shareBasis}`);
+			} else {
+				console.warn(`[Recommendations V3] ⚠️  NO SHARE BASIS FOUND! Using current price: $${currentPrice}`);
+				console.warn('[Recommendations V3] ⚠️  sharePosition result:', sharePosition);
+			}
+
+			const portfolioValue = shareCount * currentPrice;
+
+			// Transform positions to v3 format
+			const transformedPositions = positions.map((pos) => {
+				const contracts = pos.contracts ?? 0;
+				const absContracts = Math.abs(contracts);
+				let premium = pos.premium ?? pos.premiumCollected ?? 0;
+				if (absContracts > 0 && Math.abs(premium) > 50) {
+					premium = premium / absContracts;
+				}
+				if (Math.abs(premium) > 50) {
+					premium = premium / 100;
+				}
+
+				return {
+					type: pos.type || pos.optionType,
+					strike: pos.strike,
+					expiry: pos.expiry,
+					contracts,
+					premium,
+					daysToExpiry: pos.daysToExpiry,
+					position: pos.position,
+					delta: pos.delta,
+					theta: pos.theta,
+				};
+			});
+
+			const payload = {
+				ticker: tickerSymbol,
+				currentPrice,
+				shareCount,
+				shareBasis,
+				portfolioValue,
+				positions: transformedPositions,
+				strategies: strategies.map((s) => ({
+					label: s.label,
+					legCount: s.legCount,
+					maxProfit: s.maxProfit,
+					maxLoss: s.maxLoss,
+					riskProfile: (s as any).riskProfile ?? s.riskType,
+					tags: s.tags,
+				})),
+			};
+
+			console.log('[Recommendations V3] 📤 ========== PAYLOAD BEING SENT ==========');
+			console.log('[Recommendations V3] 📤 ticker:', payload.ticker);
+			console.log('[Recommendations V3] 📤 currentPrice:', payload.currentPrice);
+			console.log('[Recommendations V3] 📤 shareCount:', payload.shareCount);
+			console.log('[Recommendations V3] 📤 shareBasis:', payload.shareBasis, '← ⚠️  CHECK THIS VALUE!');
+			console.log('[Recommendations V3] 📤 portfolioValue:', payload.portfolioValue);
+			console.log('[Recommendations V3] 📤 positions:', payload.positions);
+			console.log('[Recommendations V3] 📤 strategies:', payload.strategies);
+			console.log('[Recommendations V3] 📤 ==========================================');
+			setLoadingRecommendationsV3(true);
+			setRecommendationsV3Error(null);
+
+			try {
+				const response = await callFnJson<{ success: boolean; data?: RecommendationsData; error?: string }>(
+					'integrated-analysis-v3',
+					payload
+				);
+
+				if (response.ok && response.data?.success && response.data.data) {
+					console.log('[Recommendations V3] Success:', response.data.data);
+					setRecommendationsV3(response.data.data);
+				} else {
+					const errorMsg = response.data?.error || 'Failed to fetch recommendations';
+					console.error('[Recommendations V3] Error:', errorMsg);
+					setRecommendationsV3Error(errorMsg);
+				}
+			} catch (error) {
+				console.error('[Recommendations V3] Fetch error:', error);
+				setRecommendationsV3Error(error instanceof Error ? error.message : 'Unknown error');
+			} finally {
+				setLoadingRecommendationsV3(false);
+			}
+		};
+
+		fetchRecommendationsV3();
+	}, [analysisData, priceInfo, tickerSymbol]);
+
 	useEffect(() => {
 		const priceHandler = (e: CustomEvent<PriceInfo>) => {
 			setPriceInfo(e.detail);
@@ -1410,8 +1568,41 @@ export function StockAnalysis({tickerSymbol}: StockAnalysisProps) {
 
 						{/* Recommendations Tab Content */}
 						<TabsContent value='recommendations' className='space-y-4'>
-							{analysisData?.recommendations ? (
+							{/* V3 Recommendations (when feature flag enabled and data available) */}
+							{recommendationsV3 ? (
 								<>
+									{/* Overview */}
+									<RecommendationsOverview data={recommendationsV3} ticker={tickerSymbol} />
+
+									{/* Grade Breakdown */}
+									<GradeBreakdown data={recommendationsV3} />
+
+									{/* Scenario Chart */}
+									<ScenarioChart
+										data={recommendationsV3}
+										currentPrice={priceInfo.price || analysisData?.summary?.currentPrice || 0}
+									/>
+
+									{/* Upgrade Steps */}
+									<UpgradeSteps data={recommendationsV3} />
+								</>
+							) : loadingRecommendationsV3 ? (
+								<div className="text-center py-12">
+									<div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mb-4"></div>
+									<p className="text-gray-600">Loading recommendations...</p>
+								</div>
+							) : recommendationsV3Error ? (
+								<Card>
+									<CardContent className="pt-6">
+										<div className="text-center py-8">
+											<p className="text-red-600 mb-2">Failed to load recommendations</p>
+											<p className="text-sm text-gray-500">{recommendationsV3Error}</p>
+										</div>
+									</CardContent>
+								</Card>
+							) : analysisData?.recommendations ? (
+								<>
+									{/* V2 Recommendations (fallback) */}
 									{/* Position Snapshot */}
 									<Card>
 										<CardHeader>

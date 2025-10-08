@@ -13,6 +13,7 @@
     "diagnose:analysis": "node tests/diag-integrated-analysis.js",
     "deploy:ia": "supabase functions deploy integrated-analysis --project-ref twnldqhqbybnmqbsgvpq --use-api",
     "deploy:ia-v2": "supabase functions deploy integrated-analysis-v2 --project-ref twnldqhqbybnmqbsgvpq --use-api",
+    "deploy:ia-v3": "supabase functions deploy integrated-analysis-v3 --project-ref twnldqhqbybnmqbsgvpq --use-api",
     "deploy:nav-premium": "supabase functions deploy nav-premium --project-ref twnldqhqbybnmqbsgvpq --use-api",
     "deploy:etf-flows": "supabase functions deploy etf-flows --project-ref twnldqhqbybnmqbsgvpq --use-api",
     "deploy:market-context": "supabase functions deploy market-context --project-ref twnldqhqbybnmqbsgvpq --use-api",
